@@ -15,10 +15,32 @@ import math
 
 import numpy as np
 import pandas as pd
+import requests
 import nflreadpy as nfl
 
 FIRST_SEASON = 1999
 LAST_SEASON = 2026
+INJURIES_FIRST_SEASON = 2009  # nflverse injury reports start here
+
+# Stadium coordinates for predict-time weather forecasts (outdoor games only).
+STADIUMS = {
+    "ARI": (33.5276, -112.2626), "ATL": (33.7550, -84.4010),
+    "BAL": (39.2780, -76.6227), "BUF": (42.7738, -78.7870),
+    "CAR": (35.2258, -80.8528), "CHI": (41.8623, -87.6167),
+    "CIN": (39.0955, -84.5161), "CLE": (41.5061, -81.6995),
+    "DAL": (32.7473, -97.0945), "DEN": (39.7439, -105.0201),
+    "DET": (42.3400, -83.0456), "GB": (44.5013, -88.0622),
+    "HOU": (29.6847, -95.4107), "IND": (39.7601, -86.1639),
+    "JAX": (30.3239, -81.6373), "KC": (39.0489, -94.4839),
+    "LA": (33.9535, -118.3392), "LAC": (33.9535, -118.3392),
+    "LV": (36.0909, -115.1833), "MIA": (25.9580, -80.2389),
+    "MIN": (44.9737, -93.2577), "NE": (42.0909, -71.2643),
+    "NO": (29.9511, -90.0812), "NYG": (40.8135, -74.0745),
+    "NYJ": (40.8135, -74.0745), "PHI": (39.9008, -75.1675),
+    "PIT": (40.4468, -80.0158), "SEA": (47.5952, -122.3316),
+    "SF": (37.4030, -121.9700), "TB": (27.9759, -82.5033),
+    "TEN": (36.1665, -86.7713), "WAS": (38.9076, -76.8645),
+}
 
 ELO_START = 1505.0
 ELO_MEAN = 1505.0
@@ -61,6 +83,70 @@ def load_team_epa() -> pd.DataFrame:
     return ts[["season", "week", "team", "off_epa"]]
 
 
+def load_injury_reports() -> dict:
+    """(season, week, team) -> counts of Out/Doubtful and Questionable players,
+    plus the gsis_ids of those ruled Out/Doubtful (to spot a sidelined QB)."""
+    frames = []
+    for season in range(INJURIES_FIRST_SEASON, LAST_SEASON + 1):
+        try:
+            frames.append(nfl.load_injuries([season]).to_pandas())
+        except Exception:
+            continue  # season not published yet
+    inj = pd.concat(frames, ignore_index=True)
+    inj["team"] = inj["team"].map(canon)
+    reports: dict = {}
+    for r in inj.itertuples(index=False):
+        d = reports.setdefault(
+            (r.season, r.week, r.team),
+            {"n_out": 0, "n_quest": 0, "out_ids": set()},
+        )
+        if r.report_status in ("Out", "Doubtful"):
+            d["n_out"] += 1
+            if pd.notna(r.gsis_id):
+                d["out_ids"].add(r.gsis_id)
+        elif r.report_status == "Questionable":
+            d["n_quest"] += 1
+    return reports
+
+
+_forecast_cache: dict = {}
+
+
+def forecast_weather(home_team: str, gameday, gametime) -> tuple:
+    """Open-Meteo forecast (free, no key) for a future outdoor game within the
+    16-day forecast horizon. Returns (temp_F, wind_mph) or (nan, nan)."""
+    coords = STADIUMS.get(home_team)
+    date = pd.Timestamp(gameday)
+    days_out = (date - pd.Timestamp.now().normalize()).days
+    if coords is None or not (0 <= days_out <= 15):
+        return (np.nan, np.nan)
+    key = (home_team, date.date())
+    if key in _forecast_cache:
+        return _forecast_cache[key]
+    hour = 16
+    if isinstance(gametime, str) and ":" in gametime:
+        hour = min(23, int(gametime.split(":")[0]))
+    try:
+        resp = requests.get(
+            "https://api.open-meteo.com/v1/forecast",
+            params={
+                "latitude": coords[0], "longitude": coords[1],
+                "hourly": "temperature_2m,wind_speed_10m",
+                "temperature_unit": "fahrenheit", "wind_speed_unit": "mph",
+                "timezone": "America/New_York",
+                "start_date": str(date.date()), "end_date": str(date.date()),
+            },
+            timeout=10,
+        )
+        resp.raise_for_status()
+        hourly = resp.json()["hourly"]
+        result = (hourly["temperature_2m"][hour], hourly["wind_speed_10m"][hour])
+    except Exception:
+        result = (np.nan, np.nan)
+    _forecast_cache[key] = result
+    return result
+
+
 def elo_win_prob(elo_diff: float) -> float:
     return 1.0 / (1.0 + 10.0 ** (-elo_diff / 400.0))
 
@@ -71,11 +157,13 @@ def build_features() -> pd.DataFrame:
     epa_map = {
         (r.season, r.week, r.team): r.off_epa for r in epa.itertuples(index=False)
     }
+    injuries = load_injury_reports()
 
     elo: dict[str, float] = {}
     season_of: dict[str, int] = {}
     # Per-team chronological history of completed games (newest last).
     hist: dict[str, list[dict]] = {}
+    last_qb: dict[str, str] = {}  # team -> gsis_id of most recent starter
 
     rows = []
     for g in games.itertuples(index=False):
@@ -106,6 +194,39 @@ def build_features() -> pd.DataFrame:
         rh, ra = roll(home), roll(away)
         elo_diff = elo[home] + ELO_HFA - elo[away]
 
+        # Injury report counts (NaN before 2009; 0 = reports exist, none listed).
+        def inj_counts(team: str) -> tuple:
+            rep = injuries.get((g.season, g.week, team))
+            if rep is not None:
+                return rep["n_out"], rep["n_quest"], rep["out_ids"]
+            if g.season >= INJURIES_FIRST_SEASON:
+                return 0, 0, set()
+            return np.nan, np.nan, set()
+
+        h_out, h_quest, h_out_ids = inj_counts(home)
+        a_out, a_quest, a_out_ids = inj_counts(away)
+
+        # QB change vs the team's previous game. Starters are announced pregame,
+        # so using the schedule's starter id for played games is leak-free; for
+        # future games, flag if the incumbent is Out/Doubtful on the report.
+        def qb_changed(team: str, qb_id, out_ids: set) -> float:
+            prev = last_qb.get(team)
+            if prev is None:
+                return np.nan
+            if pd.notna(qb_id):
+                return float(qb_id != prev)
+            return float(prev in out_ids)
+
+        h_qb_changed = qb_changed(home, g.home_qb_id, h_out_ids)
+        a_qb_changed = qb_changed(away, g.away_qb_id, a_out_ids)
+
+        # Weather: recorded temp/wind for past games; forecast for upcoming
+        # outdoor games inside Open-Meteo's 16-day horizon.
+        temp, wind = g.temp, g.wind
+        if (pd.isna(g.home_score) and pd.isna(temp)
+                and str(g.roof) not in ("dome", "closed")):
+            temp, wind = forecast_weather(home, g.gameday, g.gametime)
+
         rows.append({
             "game_id": g.game_id,
             "season": g.season,
@@ -127,6 +248,11 @@ def build_features() -> pd.DataFrame:
             if pd.notna(g.home_rest) and pd.notna(g.away_rest) else np.nan,
             "div_game": g.div_game,
             "is_dome": 1 if str(g.roof) in ("dome", "closed") else 0,
+            "temp": temp,
+            "wind": wind,
+            "home_n_out": h_out, "away_n_out": a_out,
+            "home_n_quest": h_quest, "away_n_quest": a_quest,
+            "home_qb_changed": h_qb_changed, "away_qb_changed": a_qb_changed,
             "home_pdiff8": rh["pdiff"], "away_pdiff8": ra["pdiff"],
             "pdiff8_diff": rh["pdiff"] - ra["pdiff"],
             "home_winrate8": rh["winrate"], "away_winrate8": ra["winrate"],
@@ -164,6 +290,10 @@ def build_features() -> pd.DataFrame:
             hist[away].append({"pf": g.away_score, "pa": g.home_score,
                                "won": float(margin < 0), "off_epa": a_epa,
                                "def_epa": h_epa})
+            if pd.notna(g.home_qb_id):
+                last_qb[home] = g.home_qb_id
+            if pd.notna(g.away_qb_id):
+                last_qb[away] = g.away_qb_id
 
     return pd.DataFrame(rows)
 
@@ -172,6 +302,9 @@ FEATURES = [
     "elo_diff", "elo_home", "elo_away", "elo_prob",
     "home_rest", "away_rest", "rest_diff",
     "div_game", "is_dome", "week",
+    "temp", "wind",
+    "home_n_out", "away_n_out", "home_n_quest", "away_n_quest",
+    "home_qb_changed", "away_qb_changed",
     "home_pdiff8", "away_pdiff8", "pdiff8_diff",
     "home_winrate8", "away_winrate8",
     "home_pf8", "home_pa8", "away_pf8", "away_pa8",

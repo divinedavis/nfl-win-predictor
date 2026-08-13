@@ -21,6 +21,9 @@ def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--season", type=int, default=LAST_SEASON)
     ap.add_argument("--week", type=int, default=None)
+    ap.add_argument("--min-conf", type=float, default=None,
+                    help="only show picks at or above this confidence, e.g. 0.65 "
+                         "(historically: 0.60→~70%% acc, 0.65→~73%%, 0.70→~76%%)")
     args = ap.parse_args()
 
     df = pd.read_parquet("features.parquet")
@@ -50,12 +53,17 @@ def main() -> None:
         games.home_prob >= 0.5, 1 - games.home_prob
     )
     games = games.sort_values("confidence", ascending=False)
+    if args.min_conf is not None:
+        games = games[games.confidence >= args.min_conf]
+        if games.empty:
+            raise SystemExit(f"No picks at confidence >= {args.min_conf:.0%}")
 
     print(f"\nNFL {args.season} — Week {week} picks "
           f"(model trained through last completed week)\n")
     for r in games.itertuples(index=False):
         date = pd.Timestamp(r.gameday).strftime("%a %m/%d")
-        line = (f"  {date}  {r.away_team:>3} @ {r.home_team:<3}  "
+        star = "*" if r.confidence >= 0.65 else " "  # historically ~73% tier
+        line = (f" {star} {date}  {r.away_team:>3} @ {r.home_team:<3}  "
                 f"pick: {r.pick:<3} {r.confidence:.0%}  "
                 f"(home {r.home_prob:.0%}, elo {r.elo_prob:.0%})")
         if pd.notna(r.home_score):
