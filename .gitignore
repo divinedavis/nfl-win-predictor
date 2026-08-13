@@ -9,3 +9,4 @@ refresh.log
 props_projections.csv
 .env
 props_lines_historical/
+kicks.csv
