@@ -244,7 +244,9 @@
     &ge;65% win probability &mdash; in an 11-season backtest those hit at 73%,
     while all picks together hit 64.9% (the Vegas closing line manages 66%).</p>
     <p>Probabilities come from an Elo rating blended with an XGBoost model using
-    team form, EPA, rest, weather forecasts, and snap-weighted injury reports.
+    team form, EPA, rest, weather forecasts, and injury reports weighted by each
+    player&rsquo;s individual rating &mdash; EPA per game for offense, box-score
+    playmaking for defense.
     Numbers reflect data as of the date above and sharpen as kickoff nears
     &mdash; injury reports and forecasts only exist in game week.</p>
   </footer>

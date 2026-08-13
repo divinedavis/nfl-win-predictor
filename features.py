@@ -35,7 +35,20 @@ POS_GROUP = {
     "CB": "db", "S": "db", "FS": "db", "SS": "db", "DB": "db", "SAF": "db",
 }
 POS_GROUPS = ["qb", "rb", "wr", "te", "ol", "dl", "lb", "db"]
-OFF_GROUPS = ["qb", "rb", "wr", "te"]  # groups with per-player EPA ratings
+OFF_GROUPS = ["qb", "rb", "wr", "te"]  # per-player value = EPA per game
+DEF_GROUPS = ["dl", "lb", "db"]        # per-player value = box-score production
+VALUE_GROUPS = OFF_GROUPS + DEF_GROUPS  # everything except OL (no public stats)
+
+# No public per-player defensive EPA exists, so defenders are valued by
+# weighted box-score playmaking per game (roughly EPA-scaled weights).
+DEF_VALUE_WEIGHTS = {
+    "def_sacks": 2.0, "def_interceptions": 4.0, "def_pass_defended": 1.0,
+    "def_tackles_for_loss": 1.0, "def_fumbles_forced": 2.0,
+    "def_qb_hits": 0.5, "def_tds": 4.0, "def_tackles_solo": 0.1,
+}
+OFF_POSITIONS = ["QB", "RB", "FB", "WR", "TE"]
+DEF_POSITIONS = ["DE", "DT", "NT", "DL", "LB", "OLB", "ILB", "MLB",
+                 "CB", "S", "FS", "SS", "DB"]
 DEFAULT_SNAP_SHARE = 0.15  # assumed share for a listed-out player with no snap history
 RATING_WINDOW = 10   # games in a player's rolling value
 RATING_SHRINK = 3    # pseudo-games of league-average (0) mixed in
@@ -148,27 +161,34 @@ def load_injury_reports() -> dict:
     return reports
 
 
-def load_player_epa_index() -> dict:
-    """(season, week, team) -> list of (gsis_id, name, group, epa_that_game)
-    for QB/RB/WR/TE — the raw material for individual player ratings."""
+def load_player_value_index() -> dict:
+    """(season, week, team) -> list of (gsis_id, name, group, value_that_game).
+    Offensive value is EPA per game; defensive value is weighted box-score
+    playmaking (DEF_VALUE_WEIGHTS) — the raw material for player ratings."""
     cols = ["season", "week", "team", "player_id", "player_display_name",
-            "position", "passing_epa", "rushing_epa", "receiving_epa"]
+            "position", "passing_epa", "rushing_epa", "receiving_epa",
+            *DEF_VALUE_WEIGHTS]
     frames = []
     for season in range(FIRST_SEASON, LAST_SEASON + 1):
         try:
             df = nfl.load_player_stats([season], summary_level="week").to_pandas()
-            frames.append(df[df["position"].isin(["QB", "RB", "FB", "WR", "TE"])][cols])
+            frames.append(
+                df[df["position"].isin(OFF_POSITIONS + DEF_POSITIONS)][cols]
+            )
         except Exception:
             continue
     ps = pd.concat(frames, ignore_index=True)
     ps["team"] = ps["team"].map(canon)
-    ps["epa_game"] = (ps["passing_epa"].fillna(0) + ps["rushing_epa"].fillna(0)
-                      + ps["receiving_epa"].fillna(0))
+    is_def = ps["position"].isin(DEF_POSITIONS)
+    off_value = (ps["passing_epa"].fillna(0) + ps["rushing_epa"].fillna(0)
+                 + ps["receiving_epa"].fillna(0))
+    def_value = sum(w * ps[c].fillna(0) for c, w in DEF_VALUE_WEIGHTS.items())
+    ps["value_game"] = off_value.where(~is_def, def_value)
     index: dict = {}
     for r in ps.itertuples(index=False):
         index.setdefault((r.season, r.week, r.team), []).append(
             (r.player_id, r.player_display_name,
-             POS_GROUP[str(r.position).upper()], float(r.epa_game))
+             POS_GROUP[str(r.position).upper()], float(r.value_game))
         )
     return index
 
@@ -248,7 +268,7 @@ def build_features() -> pd.DataFrame:
     }
     injuries = load_injury_reports()
     snaps = load_snap_index()
-    player_epa = load_player_epa_index()
+    player_values = load_player_value_index()
 
     elo: dict[str, float] = {}
     season_of: dict[str, int] = {}
@@ -284,26 +304,27 @@ def build_features() -> pd.DataFrame:
                                     else DEFAULT_SNAP_SHARE)
         return wtd
 
-    def out_epa_and_names(team: str, season: int, week: int) -> tuple:
-        """EPA-rating-weighted outs per offensive group (star out >> backup
-        out), plus a display string naming the most valuable absences."""
+    def out_value_and_names(team: str, season: int, week: int) -> tuple:
+        """Rating-weighted outs per position group (star out >> backup out) —
+        offense in EPA/game, defense in box-score playmaking/game — plus a
+        display string naming the most valuable absences."""
         rep = injuries.get((season, week, team))
         if season < INJURIES_FIRST_SEASON:
-            return {grp: np.nan for grp in OFF_GROUPS}, ""
-        out_epa = {grp: 0.0 for grp in OFF_GROUPS}
+            return {grp: np.nan for grp in VALUE_GROUPS}, ""
+        out_val = {grp: 0.0 for grp in VALUE_GROUPS}
         names = []
         if rep:
             for p in rep["out_players"]:
-                if p["group"] in OFF_GROUPS and p["gsis"]:
+                if p["group"] in VALUE_GROUPS and p["gsis"]:
                     val = rating(p["gsis"])
-                    out_epa[p["group"]] += val
+                    out_val[p["group"]] += val
                     names.append((val, f'{p["pos"]} {p["name"]} ({val:+.1f})'))
-                elif p["group"] not in OFF_GROUPS:
+                elif p["group"] == "ol":
                     shares = player_shares.get((p["norm"], p["group"]))
                     if shares and np.mean(shares[-4:]) >= 0.6:
                         names.append((0.5, f'{p["pos"]} {p["name"]} (starter)'))
-        names.sort(reverse=True)
-        return out_epa, "; ".join(n for _, n in names[:3])
+        names.sort(key=lambda n: n[0], reverse=True)
+        return out_val, "; ".join(n for _, n in names[:3])
 
     rows = []
     for g in games.itertuples(index=False):
@@ -362,8 +383,8 @@ def build_features() -> pd.DataFrame:
 
         h_wtd = weighted_outs(home, g.season, g.week)
         a_wtd = weighted_outs(away, g.season, g.week)
-        h_out_epa, h_key_outs = out_epa_and_names(home, g.season, g.week)
-        a_out_epa, a_key_outs = out_epa_and_names(away, g.season, g.week)
+        h_out_val, h_key_outs = out_value_and_names(home, g.season, g.week)
+        a_out_val, a_key_outs = out_value_and_names(away, g.season, g.week)
 
         # Individual QB rating for the expected starter: the schedule's actual
         # starter when known (announced pregame), otherwise the incumbent —
@@ -412,8 +433,10 @@ def build_features() -> pd.DataFrame:
             "home_qb_changed": h_qb_changed, "away_qb_changed": a_qb_changed,
             **{f"home_{grp}_out_wt": h_wtd[grp] for grp in POS_GROUPS},
             **{f"away_{grp}_out_wt": a_wtd[grp] for grp in POS_GROUPS},
-            **{f"home_{grp}_out_epa": h_out_epa[grp] for grp in OFF_GROUPS},
-            **{f"away_{grp}_out_epa": a_out_epa[grp] for grp in OFF_GROUPS},
+            **{f"home_{grp}_out_epa": h_out_val[grp] for grp in OFF_GROUPS},
+            **{f"away_{grp}_out_epa": a_out_val[grp] for grp in OFF_GROUPS},
+            **{f"home_{grp}_out_val": h_out_val[grp] for grp in DEF_GROUPS},
+            **{f"away_{grp}_out_val": a_out_val[grp] for grp in DEF_GROUPS},
             "home_qb_val": h_qb_val, "away_qb_val": a_qb_val,
             "qb_val_diff": h_qb_val - a_qb_val,
             "home_qb_pred_name": h_qb_name, "away_qb_pred_name": a_qb_name,
@@ -462,9 +485,9 @@ def build_features() -> pd.DataFrame:
             for team in (home, away):
                 for key, share in snaps.get((g.season, g.week, team), []):
                     player_shares.setdefault(key, []).append(share)
-                for pid, name, grp, epa_game in player_epa.get(
+                for pid, name, grp, value_game in player_values.get(
                         (g.season, g.week, team), []):
-                    val_hist.setdefault(pid, []).append(epa_game)
+                    val_hist.setdefault(pid, []).append(value_game)
                     player_names[pid] = name
                     player_group[pid] = grp
                     player_last_seen[pid] = g.season
@@ -494,6 +517,8 @@ FEATURES = [
     *[f"away_{grp}_out_wt" for grp in POS_GROUPS],
     *[f"home_{grp}_out_epa" for grp in OFF_GROUPS],
     *[f"away_{grp}_out_epa" for grp in OFF_GROUPS],
+    *[f"home_{grp}_out_val" for grp in DEF_GROUPS],
+    *[f"away_{grp}_out_val" for grp in DEF_GROUPS],
     "home_qb_val", "away_qb_val", "qb_val_diff",
     "home_pdiff8", "away_pdiff8", "pdiff8_diff",
     "home_winrate8", "away_winrate8",

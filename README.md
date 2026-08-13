@@ -31,9 +31,12 @@ so rookies and backups sit near 0 and stars ride well above. The model uses:
 - **QB ratings** for each game's expected starter (the announced starter
   historically; the incumbent for future games, or 0 if he's ruled out) —
   `qb_val_diff` ranks top-5 in feature importance.
-- **Value-weighted outs**: each Out/Doubtful skill player contributes his
-  rating, so Ja'Marr Chase out ≠ a WR4 out. Defense/OL stay snap-weighted
-  (no public per-player EPA exists for them).
+- **Value-weighted outs**: each Out/Doubtful player contributes his rating,
+  so Ja'Marr Chase out ≠ a WR4 out. Defenders are valued too — no public
+  per-player defensive EPA exists, so DL/LB/DB ratings come from weighted
+  box-score playmaking per game (sacks, INTs, passes defended, TFLs, forced
+  fumbles; `DEF_VALUE_WEIGHTS`) — Myles Garrett rates ~6.4 vs ~0 for a
+  rotational lineman. OL stays snap-weighted (no public stats at all).
 
 `features.py` also snapshots current ratings to `player_ratings.csv`.
 
