@@ -4,3 +4,5 @@ features.parquet
 model.json
 *.pyc
 * [0-9].*
+player_ratings.csv
+refresh.log

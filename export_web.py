@@ -66,6 +66,9 @@ def main() -> None:
             "outH": _f(r.home_n_out, 0), "outA": _f(r.away_n_out, 0),
             "questH": _f(r.home_n_quest, 0), "questA": _f(r.away_n_quest, 0),
             "qbH": _f(r.home_qb_changed, 0), "qbA": _f(r.away_qb_changed, 0),
+            "qbValH": _f(r.home_qb_val, 1), "qbValA": _f(r.away_qb_val, 1),
+            "qbNameH": r.home_qb_pred_name or "", "qbNameA": r.away_qb_pred_name or "",
+            "keyOutsH": r.home_key_outs or "", "keyOutsA": r.away_key_outs or "",
             "posH": {grp: w for grp in POS_GROUPS
                      if (w := _f(getattr(r, f"home_{grp}_out_wt"))) },
             "posA": {grp: w for grp in POS_GROUPS

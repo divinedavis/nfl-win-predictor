@@ -22,6 +22,28 @@ python3.12 -m venv .venv          # needs Homebrew python3.12+ (system 3.9 is to
 .venv/bin/python export_web.py    # rebuild web/index.html for the web app
 ```
 
+## Individual player ratings
+
+Every QB/RB/WR/TE carries a personal rating: his EPA per game over his last
+10 games, shrunk toward zero (`RATING_WINDOW`/`RATING_SHRINK` in features.py),
+so rookies and backups sit near 0 and stars ride well above. The model uses:
+
+- **QB ratings** for each game's expected starter (the announced starter
+  historically; the incumbent for future games, or 0 if he's ruled out) —
+  `qb_val_diff` ranks top-5 in feature importance.
+- **Value-weighted outs**: each Out/Doubtful skill player contributes his
+  rating, so Ja'Marr Chase out ≠ a WR4 out. Defense/OL stay snap-weighted
+  (no public per-player EPA exists for them).
+
+`features.py` also snapshots current ratings to `player_ratings.csv`.
+
+## Deployment
+
+Lives at `/opt/nfl-predictor` on the 104.248.12.129 droplet, served by nginx
+at `http://104.248.12.129/nfl/` (and `nfl.divinedavis.com` once DNS exists).
+`refresh.sh` runs daily at 10:30 UTC via root's crontab: fresh injuries,
+weather forecasts, retrain, redeploy to `/var/www/nfl`.
+
 ## Web app
 
 `export_web.py` bakes the season's predictions into `web/index.html` (from

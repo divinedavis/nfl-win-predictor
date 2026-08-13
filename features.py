@@ -35,7 +35,10 @@ POS_GROUP = {
     "CB": "db", "S": "db", "FS": "db", "SS": "db", "DB": "db", "SAF": "db",
 }
 POS_GROUPS = ["qb", "rb", "wr", "te", "ol", "dl", "lb", "db"]
+OFF_GROUPS = ["qb", "rb", "wr", "te"]  # groups with per-player EPA ratings
 DEFAULT_SNAP_SHARE = 0.15  # assumed share for a listed-out player with no snap history
+RATING_WINDOW = 10   # games in a player's rolling value
+RATING_SHRINK = 3    # pseudo-games of league-average (0) mixed in
 
 # Stadium coordinates for predict-time weather forecasts (outdoor games only).
 STADIUMS = {
@@ -83,11 +86,13 @@ def load_games() -> pd.DataFrame:
 
 def load_team_epa() -> pd.DataFrame:
     """Per team-game offensive EPA, keyed by (season, week, team)."""
+    cols = ["season", "week", "team", "passing_epa", "rushing_epa"]
     frames = []
     for season in range(FIRST_SEASON, LAST_SEASON + 1):
         try:
             frames.append(
-                nfl.load_team_stats([season], summary_level="week").to_pandas()
+                nfl.load_team_stats([season], summary_level="week")
+                .to_pandas()[cols]
             )
         except Exception:
             # Season not published yet (e.g. upcoming season before kickoff).
@@ -109,10 +114,12 @@ def load_injury_reports() -> dict:
     """(season, week, team) -> counts of Out/Doubtful and Questionable players,
     the gsis_ids of those ruled Out/Doubtful (to spot a sidelined QB), and
     (normalized name, position group) pairs for snap-share weighting."""
+    cols = ["season", "week", "team", "gsis_id", "position", "full_name",
+            "report_status"]
     frames = []
     for season in range(INJURIES_FIRST_SEASON, LAST_SEASON + 1):
         try:
-            frames.append(nfl.load_injuries([season]).to_pandas())
+            frames.append(nfl.load_injuries([season]).to_pandas()[cols])
         except Exception:
             continue  # season not published yet
     inj = pd.concat(frames, ignore_index=True)
@@ -129,19 +136,52 @@ def load_injury_reports() -> dict:
                 d["out_ids"].add(r.gsis_id)
             group = POS_GROUP.get(str(r.position).upper())
             if group:
-                d["out_players"].append((norm_name(r.full_name), group))
+                d["out_players"].append({
+                    "norm": norm_name(r.full_name),
+                    "name": str(r.full_name),
+                    "gsis": r.gsis_id if pd.notna(r.gsis_id) else None,
+                    "pos": str(r.position).upper(),
+                    "group": group,
+                })
         elif r.report_status == "Questionable":
             d["n_quest"] += 1
     return reports
 
 
+def load_player_epa_index() -> dict:
+    """(season, week, team) -> list of (gsis_id, name, group, epa_that_game)
+    for QB/RB/WR/TE — the raw material for individual player ratings."""
+    cols = ["season", "week", "team", "player_id", "player_display_name",
+            "position", "passing_epa", "rushing_epa", "receiving_epa"]
+    frames = []
+    for season in range(FIRST_SEASON, LAST_SEASON + 1):
+        try:
+            df = nfl.load_player_stats([season], summary_level="week").to_pandas()
+            frames.append(df[df["position"].isin(["QB", "RB", "FB", "WR", "TE"])][cols])
+        except Exception:
+            continue
+    ps = pd.concat(frames, ignore_index=True)
+    ps["team"] = ps["team"].map(canon)
+    ps["epa_game"] = (ps["passing_epa"].fillna(0) + ps["rushing_epa"].fillna(0)
+                      + ps["receiving_epa"].fillna(0))
+    index: dict = {}
+    for r in ps.itertuples(index=False):
+        index.setdefault((r.season, r.week, r.team), []).append(
+            (r.player_id, r.player_display_name,
+             POS_GROUP[str(r.position).upper()], float(r.epa_game))
+        )
+    return index
+
+
 def load_snap_index() -> dict:
     """(season, week, team) -> list of ((name, group), snap_share) for that game.
     Share is the player's fraction of his side's snaps (offense or defense)."""
+    cols = ["season", "week", "team", "player", "position",
+            "offense_pct", "defense_pct"]
     frames = []
     for season in range(SNAPS_FIRST_SEASON - 1, LAST_SEASON + 1):
         try:
-            frames.append(nfl.load_snap_counts([season]).to_pandas())
+            frames.append(nfl.load_snap_counts([season]).to_pandas()[cols])
         except Exception:
             continue
     sc = pd.concat(frames, ignore_index=True)
@@ -208,6 +248,7 @@ def build_features() -> pd.DataFrame:
     }
     injuries = load_injury_reports()
     snaps = load_snap_index()
+    player_epa = load_player_epa_index()
 
     elo: dict[str, float] = {}
     season_of: dict[str, int] = {}
@@ -217,6 +258,17 @@ def build_features() -> pd.DataFrame:
     # (name, group) -> recent snap shares (newest last), updated post-game so
     # lookups during feature building only ever see pregame information.
     player_shares: dict[tuple, list] = {}
+    # gsis_id -> recent per-game EPA (newest last); the player's rating is a
+    # shrunk rolling mean, so rookies/backups sit near 0 and stars well above.
+    val_hist: dict[str, list] = {}
+    player_names: dict[str, str] = {}
+    player_group: dict[str, str] = {}
+    player_last_seen: dict[str, int] = {}
+
+    def rating(pid) -> float:
+        games_ = val_hist.get(pid, [])
+        recent = games_[-RATING_WINDOW:]
+        return float(sum(recent) / (len(recent) + RATING_SHRINK))
 
     def weighted_outs(team: str, season: int, week: int) -> dict:
         """Snap-share-weighted sum of Out/Doubtful players per position group:
@@ -226,11 +278,32 @@ def build_features() -> pd.DataFrame:
         rep = injuries.get((season, week, team))
         wtd = {grp: 0.0 for grp in POS_GROUPS}
         if rep:
-            for name, grp in rep["out_players"]:
-                shares = player_shares.get((name, grp))
-                wtd[grp] += (float(np.mean(shares[-4:])) if shares
-                             else DEFAULT_SNAP_SHARE)
+            for p in rep["out_players"]:
+                shares = player_shares.get((p["norm"], p["group"]))
+                wtd[p["group"]] += (float(np.mean(shares[-4:])) if shares
+                                    else DEFAULT_SNAP_SHARE)
         return wtd
+
+    def out_epa_and_names(team: str, season: int, week: int) -> tuple:
+        """EPA-rating-weighted outs per offensive group (star out >> backup
+        out), plus a display string naming the most valuable absences."""
+        rep = injuries.get((season, week, team))
+        if season < INJURIES_FIRST_SEASON:
+            return {grp: np.nan for grp in OFF_GROUPS}, ""
+        out_epa = {grp: 0.0 for grp in OFF_GROUPS}
+        names = []
+        if rep:
+            for p in rep["out_players"]:
+                if p["group"] in OFF_GROUPS and p["gsis"]:
+                    val = rating(p["gsis"])
+                    out_epa[p["group"]] += val
+                    names.append((val, f'{p["pos"]} {p["name"]} ({val:+.1f})'))
+                elif p["group"] not in OFF_GROUPS:
+                    shares = player_shares.get((p["norm"], p["group"]))
+                    if shares and np.mean(shares[-4:]) >= 0.6:
+                        names.append((0.5, f'{p["pos"]} {p["name"]} (starter)'))
+        names.sort(reverse=True)
+        return out_epa, "; ".join(n for _, n in names[:3])
 
     rows = []
     for g in games.itertuples(index=False):
@@ -289,6 +362,20 @@ def build_features() -> pd.DataFrame:
 
         h_wtd = weighted_outs(home, g.season, g.week)
         a_wtd = weighted_outs(away, g.season, g.week)
+        h_out_epa, h_key_outs = out_epa_and_names(home, g.season, g.week)
+        a_out_epa, a_key_outs = out_epa_and_names(away, g.season, g.week)
+
+        # Individual QB rating for the expected starter: the schedule's actual
+        # starter when known (announced pregame), otherwise the incumbent —
+        # unless he's Out/Doubtful, in which case an unknown backup rates 0.
+        def qb_value(team: str, qb_id, out_ids: set) -> tuple:
+            pid = qb_id if pd.notna(qb_id) else last_qb.get(team)
+            if pid is None or (pd.isna(qb_id) and pid in out_ids):
+                return 0.0, ""
+            return rating(pid), player_names.get(pid, "")
+
+        h_qb_val, h_qb_name = qb_value(home, g.home_qb_id, h_out_ids)
+        a_qb_val, a_qb_name = qb_value(away, g.away_qb_id, a_out_ids)
 
         # Weather: recorded temp/wind for past games; forecast for upcoming
         # outdoor games inside Open-Meteo's 16-day horizon.
@@ -325,6 +412,12 @@ def build_features() -> pd.DataFrame:
             "home_qb_changed": h_qb_changed, "away_qb_changed": a_qb_changed,
             **{f"home_{grp}_out_wt": h_wtd[grp] for grp in POS_GROUPS},
             **{f"away_{grp}_out_wt": a_wtd[grp] for grp in POS_GROUPS},
+            **{f"home_{grp}_out_epa": h_out_epa[grp] for grp in OFF_GROUPS},
+            **{f"away_{grp}_out_epa": a_out_epa[grp] for grp in OFF_GROUPS},
+            "home_qb_val": h_qb_val, "away_qb_val": a_qb_val,
+            "qb_val_diff": h_qb_val - a_qb_val,
+            "home_qb_pred_name": h_qb_name, "away_qb_pred_name": a_qb_name,
+            "home_key_outs": h_key_outs, "away_key_outs": a_key_outs,
             "home_pdiff8": rh["pdiff"], "away_pdiff8": ra["pdiff"],
             "pdiff8_diff": rh["pdiff"] - ra["pdiff"],
             "home_winrate8": rh["winrate"], "away_winrate8": ra["winrate"],
@@ -369,6 +462,23 @@ def build_features() -> pd.DataFrame:
             for team in (home, away):
                 for key, share in snaps.get((g.season, g.week, team), []):
                     player_shares.setdefault(key, []).append(share)
+                for pid, name, grp, epa_game in player_epa.get(
+                        (g.season, g.week, team), []):
+                    val_hist.setdefault(pid, []).append(epa_game)
+                    player_names[pid] = name
+                    player_group[pid] = grp
+                    player_last_seen[pid] = g.season
+
+    # Snapshot of current player ratings (EPA per game, shrunk) for analysis
+    # and the web app's player pages.
+    ratings = pd.DataFrame([
+        {"gsis_id": pid, "name": player_names.get(pid, ""),
+         "group": player_group.get(pid, ""), "games": len(h),
+         "rating": round(rating(pid), 2)}
+        for pid, h in val_hist.items()
+        if player_last_seen.get(pid, 0) >= LAST_SEASON - 1
+    ]).sort_values("rating", ascending=False)
+    ratings.to_csv("player_ratings.csv", index=False)
 
     return pd.DataFrame(rows)
 
@@ -382,6 +492,9 @@ FEATURES = [
     "home_qb_changed", "away_qb_changed",
     *[f"home_{grp}_out_wt" for grp in POS_GROUPS],
     *[f"away_{grp}_out_wt" for grp in POS_GROUPS],
+    *[f"home_{grp}_out_epa" for grp in OFF_GROUPS],
+    *[f"away_{grp}_out_epa" for grp in OFF_GROUPS],
+    "home_qb_val", "away_qb_val", "qb_val_diff",
     "home_pdiff8", "away_pdiff8", "pdiff8_diff",
     "home_winrate8", "away_winrate8",
     "home_pf8", "home_pa8", "away_pf8", "away_pa8",

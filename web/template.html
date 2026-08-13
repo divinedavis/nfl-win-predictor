@@ -322,6 +322,13 @@
         "; defense allowing " + pk + " " + signed(P("def")) + " vs " + opp + " " +
         signed(O("def")) + " (lower allowed is better).");
     }
+    if (f.qbNameH && f.qbNameA) {
+      const better = f.qbValH >= f.qbValA;
+      out.push("<b>Quarterbacks:</b> " + g.home + " " + f.qbNameH + " (" + signed(f.qbValH) +
+        " EPA/gm) vs " + g.away + " " + f.qbNameA + " (" + signed(f.qbValA) +
+        ") — individual ratings from each QB’s last 10 starts, edge " +
+        (better ? g.home : g.away) + ".");
+    }
     if (f.restH != null && f.restA != null && f.restH !== f.restA) {
       const rested = f.restH > f.restA ? g.home : g.away;
       out.push("<b>Rest:</b> " + g.home + " on " + f.restH + " days, " + g.away +
@@ -342,6 +349,9 @@
           if (!worst || w > worst.w) worst = { side, grp, w };
       if (worst) inj += " Biggest hit: the " + worst.side + " " + POS_NAMES[worst.grp] +
         " group (" + worst.w.toFixed(1) + " full-time starters out).";
+      for (const [side, key] of [[g.home, f.keyOutsH], [g.away, f.keyOutsA]])
+        if (key) inj += " Key " + side + " absences: " + key +
+          " — numbers are the player’s EPA-per-game rating, so a star out weighs more than a backup.";
       out.push(inj + qbNote);
     } else {
       out.push("<b>Injury report:</b> not out yet — reports land in game week" +
