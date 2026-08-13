@@ -110,3 +110,27 @@ thing any honest model achieves — 70%+ on the starred subset is.
 
 `spread_line` is stored in the feature table as a benchmark only; it is never
 fed to the model.
+
+## Player props (paper trading)
+
+Quantile projections (P10/P25/P50/P75/P90) for the four liquid prop markets —
+passing yards, rushing yards, receiving yards, receptions — from rolling
+usage/efficiency, opponent positional defense, and game context. Walk-forward
+validated 2021–2025: 6–10% better pinball loss than a player-history baseline,
+with honest coverage (the 50% band catches ~52%, the 80% band ~81–86%).
+
+```bash
+.venv/bin/python props.py --validate   # walk-forward backtest
+.venv/bin/python props.py              # project next week -> props_projections.csv
+ODDS_API_KEY=... .venv/bin/python fetch_props.py   # snapshot DraftKings lines
+.venv/bin/python paper_trade.py --pick     # log edges >=5% as $0 paper picks
+.venv/bin/python paper_trade.py --settle   # score finished weeks
+```
+
+**No real money.** A backtest of the game model against 11 seasons of closing
+moneylines lost at every edge threshold (and parlays compound the leak, -10%
+ROI), so props follow a pre-committed rule: nothing is staked unless the paper
+record clears the 53.3% breakeven (-114 juice) over 200+ settled picks.
+Historical prop lines are paywalled — paper trading the live season is the only
+honest test. Lines come from The Odds API free tier (hard-capped: one snapshot
+per day, one book, four markets).

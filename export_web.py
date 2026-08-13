@@ -58,6 +58,56 @@ def _f(x, nd=2):
     return int(v) if nd == 0 else v
 
 
+STAT_LABELS = {
+    "passing_yards": "Passing yards", "rushing_yards": "Rushing yards",
+    "receiving_yards": "Receiving yards", "receptions": "Receptions",
+}
+
+
+def props_payload():
+    """Player-prop projections + paper-trade record for the dashboard's
+    props section; None (section hidden) until props.py has run."""
+    path = Path("props_projections.csv")
+    if not path.exists():
+        return None
+    proj = pd.read_csv(path)
+    if proj.empty:
+        return None
+    stats = []
+    for stat, label in STAT_LABELS.items():
+        d = proj[proj.stat == stat].nlargest(12, "p50")
+        players = [{
+            "player": r.player, "pos": r.position, "team": r.team,
+            "opp": r.opp, "home": bool(r.is_home),
+            "p10": r.p10, "p25": r.p25, "p50": r.p50,
+            "p75": r.p75, "p90": r.p90,
+        } for r in d.itertuples(index=False)]
+        if players:
+            stats.append({"key": stat, "label": label, "players": players})
+    if not stats:
+        return None
+
+    paper = None
+    ledger_path = Path("paper_trades.csv")
+    if ledger_path.exists():
+        led = pd.read_csv(ledger_path)
+        done = led[led["won"].isin(["True", "False"])]
+        wins = int((done["won"] == "True").sum())
+        losses = len(done) - wins
+        roi = None
+        if len(done):
+            payouts = [100 / -o if o < 0 else o / 100 for o in done["odds"]]
+            pnl = [p if w == "True" else -1.0
+                   for p, w in zip(payouts, done["won"])]
+            roi = round(100 * sum(pnl) / len(pnl), 1)
+        paper = {"wins": wins, "losses": losses, "open": int(len(led) - len(done)),
+                 "roi": roi}
+
+    return {"week": int(proj["week"].iloc[0]),
+            "season": int(proj["season"].iloc[0]),
+            "stats": stats, "paper": paper}
+
+
 def main() -> None:
     df = pd.read_parquet("features.parquet")
     season = df[(df.season == LAST_SEASON) & (df.game_type == "REG")].copy()
@@ -135,6 +185,7 @@ def main() -> None:
         "teams": {abbr: {"name": name, "division": div}
                   for abbr, (name, div) in TEAMS.items()},
         "games": games,
+        "props": props_payload(),
     }
 
     template = Path("web/template.html").read_text()

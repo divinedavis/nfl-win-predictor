@@ -6,3 +6,4 @@ model.json
 * [0-9].*
 player_ratings.csv
 refresh.log
+props_projections.csv

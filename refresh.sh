@@ -12,6 +12,7 @@ LOG=refresh.log
   echo "=== refresh $(date -Is) ==="
   $PY features.py
   $PY train.py | tail -4
+  $PY props.py || echo "props projection failed (non-fatal)"
   $PY export_web.py
   if [ -d /var/www/nfl ]; then
     cp web/index.html /var/www/nfl/index.html
