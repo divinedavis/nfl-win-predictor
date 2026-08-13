@@ -378,7 +378,7 @@ def build_features() -> pd.DataFrame:
         full. Also returns a display string naming the biggest absences."""
         rep = injuries.get((season, week, team))
         if season < INJURIES_FIRST_SEASON:
-            return {grp: np.nan for grp in VALUE_GROUPS}, ""
+            return {grp: np.nan for grp in VALUE_GROUPS}, "", 0.0
         out_val = {grp: 0.0 for grp in VALUE_GROUPS}
         names = []
         counted = set()
@@ -404,14 +404,17 @@ def build_features() -> pd.DataFrame:
         if ir_players is None:
             latest = ir_latest.get((season, team))
             ir_players = latest[1] if latest else []
+        ir_wt = 0.0
         for p in ir_players:
             if (p["group"] in VALUE_GROUPS and p["gsis"] not in counted
                     and seen_recently(p["gsis"], season, week)):
                 val = player_value(p)
                 out_val[p["group"]] += val
                 names.append((val, f'{p["pos"]} {p["name"]} (IR, {val:+.1f})'))
+                shares = player_shares.get((p["norm"], p["group"]))
+                ir_wt += float(np.mean(shares[-4:])) if shares else 0.0
         names.sort(key=lambda n: n[0], reverse=True)
-        return out_val, "; ".join(n for _, n in names[:3])
+        return out_val, "; ".join(n for _, n in names[:3]), ir_wt
 
     rows = []
     for g in games.itertuples(index=False):
@@ -470,8 +473,8 @@ def build_features() -> pd.DataFrame:
 
         h_wtd = weighted_outs(home, g.season, g.week)
         a_wtd = weighted_outs(away, g.season, g.week)
-        h_out_val, h_key_outs = out_value_and_names(home, g.season, g.week)
-        a_out_val, a_key_outs = out_value_and_names(away, g.season, g.week)
+        h_out_val, h_key_outs, h_ir_wt = out_value_and_names(home, g.season, g.week)
+        a_out_val, a_key_outs, a_ir_wt = out_value_and_names(away, g.season, g.week)
 
         # Individual QB rating for the expected starter: the schedule's actual
         # starter when known (announced pregame), otherwise the incumbent —
@@ -535,6 +538,9 @@ def build_features() -> pd.DataFrame:
             "qb_val_diff": h_qb_val - a_qb_val,
             "home_qb_pred_name": h_qb_name, "away_qb_pred_name": a_qb_name,
             "home_key_outs": h_key_outs, "away_key_outs": a_key_outs,
+            # Display-only (not model features): snap weight of recent-IR
+            # players, so the app's starters-out count includes them.
+            "home_ir_wt": h_ir_wt, "away_ir_wt": a_ir_wt,
             "home_pdiff8": rh["pdiff"], "away_pdiff8": ra["pdiff"],
             "pdiff8_diff": rh["pdiff"] - ra["pdiff"],
             "home_winrate8": rh["winrate"], "away_winrate8": ra["winrate"],

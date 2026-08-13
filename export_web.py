@@ -11,8 +11,23 @@ from pathlib import Path
 import pandas as pd
 from xgboost import XGBClassifier
 
-from features import FEATURES, LAST_SEASON, POS_GROUPS
+from features import (DEF_GROUPS, FEATURES, LAST_SEASON, OFF_GROUPS,
+                      POS_GROUPS)
 from train import ELO_BLEND
+
+# Favorites missing ~3 starters vs a healthy opponent won 62% (2013-2025)
+# instead of the 67% all favorites win — the "upset watch" evidence base.
+# 2.0 expected starters (snap-weighted, Questionable discounted, IR included)
+# corresponds to ~3 actual bodies missing.
+UPSET_OUT_THRESHOLD = 2.0
+UPSET_OPP_HEALTHY = 0.8     # opponent must be under this
+
+
+def injury_cols(side: str) -> list:
+    return ([f"{side}_n_out", f"{side}_n_quest", f"{side}_qb_changed"]
+            + [f"{side}_{g}_out_wt" for g in POS_GROUPS]
+            + [f"{side}_{g}_out_epa" for g in OFF_GROUPS]
+            + [f"{side}_{g}_out_val" for g in DEF_GROUPS])
 
 TEAMS = {
     "BUF": ("Buffalo Bills", "AFC East"), "MIA": ("Miami Dolphins", "AFC East"),
@@ -49,9 +64,25 @@ def main() -> None:
 
     model = XGBClassifier()
     model.load_model("model.json")
+
+    def blend(frame):
+        raw = model.predict_proba(frame[FEATURES])[:, 1]
+        return (1 - ELO_BLEND) * raw + ELO_BLEND * frame["elo_prob"].values
+
     season["xgb_raw"] = model.predict_proba(season[FEATURES])[:, 1]
     season["home_prob"] = ((1 - ELO_BLEND) * season["xgb_raw"]
                            + ELO_BLEND * season["elo_prob"])
+
+    # Counterfactual: each side at full strength (its injury features zeroed),
+    # to show what the absences cost. Elo is injury-blind so it stays fixed.
+    healthy_home = season.copy(); healthy_home[injury_cols("home")] = 0.0
+    healthy_away = season.copy(); healthy_away[injury_cols("away")] = 0.0
+    season["prob_home_healthy"] = blend(healthy_home)
+    season["prob_away_healthy"] = blend(healthy_away)
+    for side in ("home", "away"):
+        season[f"{side}_starters_out"] = sum(
+            season[f"{side}_{g}_out_wt"].fillna(0) for g in POS_GROUPS
+        ) + season[f"{side}_ir_wt"].fillna(0)
 
     games = []
     for r in season.sort_values(["week", "gameday"]).itertuples(index=False):
@@ -73,11 +104,20 @@ def main() -> None:
                      if (w := _f(getattr(r, f"home_{grp}_out_wt"))) },
             "posA": {grp: w for grp in POS_GROUPS
                      if (w := _f(getattr(r, f"away_{grp}_out_wt"))) },
+            # Injury cost in win-probability points, per team, vs full strength
+            "impH": _f((r.prob_home_healthy - r.home_prob) * 100, 0),
+            "impA": _f((r.home_prob - r.prob_away_healthy) * 100, 0),
+            "outStH": _f(r.home_starters_out, 1), "outStA": _f(r.away_starters_out, 1),
             "pdiffH": _f(r.home_pdiff8, 1), "pdiffA": _f(r.away_pdiff8, 1),
             "wrH": _f(r.home_winrate8), "wrA": _f(r.away_winrate8),
             "offH": _f(r.home_off_epa8, 1), "offA": _f(r.away_off_epa8, 1),
             "defH": _f(r.home_def_epa8, 1), "defA": _f(r.away_def_epa8, 1),
         }
+        fav_is_home = r.home_prob >= 0.5
+        fav_out = r.home_starters_out if fav_is_home else r.away_starters_out
+        opp_out = r.away_starters_out if fav_is_home else r.home_starters_out
+        factors["upset"] = bool(fav_out >= UPSET_OUT_THRESHOLD
+                                and opp_out <= UPSET_OPP_HEALTHY)
         games.append({
             "week": int(r.week),
             "date": pd.Timestamp(r.gameday).strftime("%Y-%m-%d"),

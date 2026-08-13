@@ -194,6 +194,7 @@
   .badge.hit { background: var(--field-soft); color: var(--field); }
   .badge.miss { background: var(--track); color: var(--muted); }
   .badge.starred { background: var(--star-soft); color: var(--star); }
+  .badge.upset { background: var(--star-soft); color: var(--star); border: 1px solid var(--star); }
 
   .legend { display: flex; gap: 16px; flex-wrap: wrap; margin: 14px 0 0; color: var(--muted); font-size: 0.8rem; }
   .legend .dot { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 5px; vertical-align: -1px; }
@@ -242,7 +243,11 @@
   <footer>
     <p><span class="badge starred">&#9733; high confidence</span> marks picks at
     &ge;65% win probability &mdash; in an 11-season backtest those hit at 73%,
-    while all picks together hit 64.9% (the Vegas closing line manages 66%).</p>
+    while all picks together hit 65% (the Vegas closing line manages 66%).
+    <span class="badge upset">&#9888; upset watch</span> flags a favorite missing
+    3+ starters against a mostly healthy opponent &mdash; favorites in that spot
+    win only 62% historically; each game&rsquo;s panel shows how many points the
+    absences cost vs full strength.</p>
     <p>Probabilities come from an Elo rating blended with an XGBoost model using
     team form, EPA, rest, weather forecasts, and injury reports weighted by each
     player&rsquo;s individual rating &mdash; EPA per game for offense, box-score
@@ -356,6 +361,18 @@
         if (key) inj += " Key " + side + " absences: " + key +
           " — numbers are the player’s EPA-per-game rating, so a star out weighs more than a backup.";
       out.push(inj + qbNote);
+      for (const [side, imp, healthy] of [[g.home, f.impH, f.impH + Math.round(g.homeProb * 100)],
+                                          [g.away, f.impA, f.impA + Math.round((1 - g.homeProb) * 100)]])
+        if (imp >= 1) out.push("<b>Injury cost:</b> " + side + " would be " + healthy +
+          "% at full strength — the absences shave <b>" + imp + " point" + (imp > 1 ? "s" : "") +
+          "</b> off their win probability.");
+      if (f.upset) {
+        const fav = pick(g), und = fav === g.home ? g.away : g.home;
+        const favOut = fav === g.home ? f.outStH : f.outStA;
+        out.push("<b>⚠ Upset watch:</b> " + fav + " is favored while missing ~" +
+          Math.round(favOut) + " starters against a mostly healthy " + und +
+          " — favorites in this spot historically win 62% instead of their usual 67%.");
+      }
     } else {
       out.push("<b>Injury report:</b> not out yet — reports land in game week" +
         " and this number sharpens when they do." + qbNote);
@@ -406,9 +423,12 @@
       pctLabel = Math.round(conf(g) * 100) + "%";
     }
     let result = "";
+    if ((g.f || {}).upset && !played(g)) {
+      result += ' <span class="badge upset" title="favorite missing 3+ starters vs a healthy opponent">&#9888; upset watch</span>';
+    }
     if (played(g)) {
       const hit = winner(g) === pick(g);
-      result = ' <span class="badge ' + (hit ? "hit" : "miss") + '">' +
+      result += ' <span class="badge ' + (hit ? "hit" : "miss") + '">' +
         g.awayScore + "–" + g.homeScore + " " + (hit ? "HIT" : "MISS") + "</span>";
     }
     const open = expanded.has(gid(g));
