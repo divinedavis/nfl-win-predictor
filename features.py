@@ -56,6 +56,12 @@ RATING_SHRINK = 3    # pseudo-games of league-average (0) mixed in
 # shows no sacks), so a defender's value is floored by his playing time:
 # a 100%-snap defender never rates below this, whatever his stat line.
 DEF_SNAP_VALUE_FLOOR = 1.5
+# Measured league-wide 2022-24: 37% of Questionable players took zero snaps,
+# so a Questionable player counts at this fraction of his value.
+QUESTIONABLE_WEIGHT = 0.37
+# A player on IR counts as out only while his absence is news — after this
+# many weeks his loss is already baked into the team's recent form and Elo.
+IR_RECENT_WEEKS = 5
 
 # Stadium coordinates for predict-time weather forecasts (outdoor games only).
 STADIUMS = {
@@ -147,22 +153,57 @@ def load_injury_reports() -> dict:
             (r.season, r.week, r.team),
             {"n_out": 0, "n_quest": 0, "out_ids": set(), "out_players": []},
         )
+        group = POS_GROUP.get(str(r.position).upper())
+        player = {
+            "norm": norm_name(r.full_name),
+            "name": str(r.full_name),
+            "gsis": r.gsis_id if pd.notna(r.gsis_id) else None,
+            "pos": str(r.position).upper(),
+            "group": group,
+        }
         if r.report_status in ("Out", "Doubtful"):
             d["n_out"] += 1
             if pd.notna(r.gsis_id):
                 d["out_ids"].add(r.gsis_id)
-            group = POS_GROUP.get(str(r.position).upper())
             if group:
-                d["out_players"].append({
-                    "norm": norm_name(r.full_name),
-                    "name": str(r.full_name),
-                    "gsis": r.gsis_id if pd.notna(r.gsis_id) else None,
-                    "pos": str(r.position).upper(),
-                    "group": group,
-                })
+                d["out_players"].append(player)
         elif r.report_status == "Questionable":
             d["n_quest"] += 1
+            if group:
+                d.setdefault("quest_players", []).append(player)
     return reports
+
+
+def load_ir_index() -> tuple:
+    """Players on injured reserve, from weekly roster status (public days
+    before kickoff, unlike game-status reports which never list IR).
+    Returns ((season, week, team) -> [player dicts], and per (season, team)
+    the latest known week's list for upcoming games with no roster row yet)."""
+    cols = ["season", "week", "team", "gsis_id", "full_name", "position",
+            "status"]
+    frames = []
+    for season in range(INJURIES_FIRST_SEASON, LAST_SEASON + 1):
+        try:
+            frames.append(nfl.load_rosters_weekly([season]).to_pandas()[cols])
+        except Exception:
+            continue
+    ros = pd.concat(frames, ignore_index=True)
+    ros["team"] = ros["team"].map(canon)
+    ir = ros[ros["status"] == "RES"]
+    index: dict = {}
+    for r in ir.itertuples(index=False):
+        group = POS_GROUP.get(str(r.position).upper())
+        if not group or pd.isna(r.gsis_id):
+            continue
+        index.setdefault((r.season, r.week, r.team), []).append({
+            "norm": norm_name(r.full_name), "name": str(r.full_name),
+            "gsis": r.gsis_id, "pos": str(r.position).upper(), "group": group,
+        })
+    latest: dict = {}
+    for (season, week, team), players in index.items():
+        if week >= latest.get((season, team), (0, None))[0]:
+            latest[(season, team)] = (week, players)
+    return index, latest
 
 
 def load_player_value_index() -> dict:
@@ -273,6 +314,7 @@ def build_features() -> pd.DataFrame:
     injuries = load_injury_reports()
     snaps = load_snap_index()
     player_values = load_player_value_index()
+    ir_index, ir_latest = load_ir_index()
 
     elo: dict[str, float] = {}
     season_of: dict[str, int] = {}
@@ -287,7 +329,17 @@ def build_features() -> pd.DataFrame:
     val_hist: dict[str, list] = {}
     player_names: dict[str, str] = {}
     player_group: dict[str, str] = {}
-    player_last_seen: dict[str, int] = {}
+    player_last_seen: dict[str, tuple] = {}  # pid -> (season, week)
+
+    def seen_recently(pid, season: int, week: int) -> bool:
+        """Was this player on the field recently enough that his IR absence
+        is still news rather than old form the ratings already absorbed?"""
+        last = player_last_seen.get(pid)
+        if last is None:
+            return False
+        if last[0] == season:
+            return week - last[1] <= IR_RECENT_WEEKS
+        return last[0] == season - 1 and week <= IR_RECENT_WEEKS
 
     def rating(pid) -> float:
         games_ = val_hist.get(pid, [])
@@ -308,29 +360,56 @@ def build_features() -> pd.DataFrame:
                                     else DEFAULT_SNAP_SHARE)
         return wtd
 
+    def player_value(p: dict) -> float:
+        """A player's effective value: rating, floored by snap share for
+        defenders (box scores underrate block-eaters)."""
+        val = rating(p["gsis"])
+        if p["group"] in DEF_GROUPS:
+            shares = player_shares.get((p["norm"], p["group"]))
+            share = float(np.mean(shares[-4:])) if shares else 0.0
+            val = max(val, DEF_SNAP_VALUE_FLOOR * share)
+        return val
+
     def out_value_and_names(team: str, season: int, week: int) -> tuple:
-        """Rating-weighted outs per position group (star out >> backup out) —
-        offense in EPA/game, defense in box-score playmaking/game — plus a
-        display string naming the most valuable absences."""
+        """Rating-weighted absences per position group (star out >> backup
+        out) — offense in EPA/game, defense in box-score playmaking/game.
+        Out/Doubtful count in full, Questionable at the measured 37% sit
+        rate, and recently-lost IR players (never on game-status reports) in
+        full. Also returns a display string naming the biggest absences."""
         rep = injuries.get((season, week, team))
         if season < INJURIES_FIRST_SEASON:
             return {grp: np.nan for grp in VALUE_GROUPS}, ""
         out_val = {grp: 0.0 for grp in VALUE_GROUPS}
         names = []
+        counted = set()
         if rep:
             for p in rep["out_players"]:
                 if p["group"] in VALUE_GROUPS and p["gsis"]:
-                    val = rating(p["gsis"])
-                    if p["group"] in DEF_GROUPS:
-                        shares = player_shares.get((p["norm"], p["group"]))
-                        share = float(np.mean(shares[-4:])) if shares else 0.0
-                        val = max(val, DEF_SNAP_VALUE_FLOOR * share)
+                    val = player_value(p)
                     out_val[p["group"]] += val
+                    counted.add(p["gsis"])
                     names.append((val, f'{p["pos"]} {p["name"]} ({val:+.1f})'))
                 elif p["group"] == "ol":
                     shares = player_shares.get((p["norm"], p["group"]))
                     if shares and np.mean(shares[-4:]) >= 0.6:
                         names.append((0.5, f'{p["pos"]} {p["name"]} (starter)'))
+            for p in rep.get("quest_players", []):
+                if p["group"] in VALUE_GROUPS and p["gsis"]:
+                    val = QUESTIONABLE_WEIGHT * player_value(p)
+                    out_val[p["group"]] += val
+                    counted.add(p["gsis"])
+                    if val >= 0.5:
+                        names.append((val, f'{p["pos"]} {p["name"]} (Q, {val:+.1f})'))
+        ir_players = ir_index.get((season, week, team))
+        if ir_players is None:
+            latest = ir_latest.get((season, team))
+            ir_players = latest[1] if latest else []
+        for p in ir_players:
+            if (p["group"] in VALUE_GROUPS and p["gsis"] not in counted
+                    and seen_recently(p["gsis"], season, week)):
+                val = player_value(p)
+                out_val[p["group"]] += val
+                names.append((val, f'{p["pos"]} {p["name"]} (IR, {val:+.1f})'))
         names.sort(key=lambda n: n[0], reverse=True)
         return out_val, "; ".join(n for _, n in names[:3])
 
@@ -396,10 +475,17 @@ def build_features() -> pd.DataFrame:
 
         # Individual QB rating for the expected starter: the schedule's actual
         # starter when known (announced pregame), otherwise the incumbent —
-        # unless he's Out/Doubtful, in which case an unknown backup rates 0.
+        # unless he's Out/Doubtful or on IR, in which case a backup rates 0.
+        def ir_ids(team: str) -> set:
+            players = ir_index.get((g.season, g.week, team))
+            if players is None:
+                latest = ir_latest.get((g.season, team))
+                players = latest[1] if latest else []
+            return {p["gsis"] for p in players}
+
         def qb_value(team: str, qb_id, out_ids: set) -> tuple:
             pid = qb_id if pd.notna(qb_id) else last_qb.get(team)
-            if pid is None or (pd.isna(qb_id) and pid in out_ids):
+            if pid is None or (pd.isna(qb_id) and pid in (out_ids | ir_ids(team))):
                 return 0.0, ""
             return rating(pid), player_names.get(pid, "")
 
@@ -498,7 +584,7 @@ def build_features() -> pd.DataFrame:
                     val_hist.setdefault(pid, []).append(value_game)
                     player_names[pid] = name
                     player_group[pid] = grp
-                    player_last_seen[pid] = g.season
+                    player_last_seen[pid] = (g.season, g.week)
 
     # Snapshot of current player ratings (EPA per game, shrunk) for analysis
     # and the web app's player pages.
@@ -507,7 +593,7 @@ def build_features() -> pd.DataFrame:
          "group": player_group.get(pid, ""), "games": len(h),
          "rating": round(rating(pid), 2)}
         for pid, h in val_hist.items()
-        if player_last_seen.get(pid, 0) >= LAST_SEASON - 1
+        if player_last_seen.get(pid, (0, 0))[0] >= LAST_SEASON - 1
     ]).sort_values("rating", ascending=False)
     ratings.to_csv("player_ratings.csv", index=False)
 
