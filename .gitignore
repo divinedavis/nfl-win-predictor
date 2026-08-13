@@ -1,0 +1,6 @@
+.venv/
+__pycache__/
+features.parquet
+model.json
+*.pyc
+* [0-9].*
