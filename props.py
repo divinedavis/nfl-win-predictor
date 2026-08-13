@@ -20,7 +20,7 @@ import pandas as pd
 import nflreadpy as nfl
 from xgboost import XGBRegressor
 
-from features import LAST_SEASON, canon
+from features import LAST_SEASON, canon, load_injury_reports, norm_name
 
 FIRST_SEASON = 2006          # modern passing era; enough history for training
 QUANTILES = [0.10, 0.25, 0.50, 0.75, 0.90]
@@ -50,6 +50,21 @@ PARAMS = dict(
 FEATS = ["y4", "y10", "ystd10", "use4", "use10", "share4", "games_prior",
          "is_home", "is_dome", "team_elo_prob", "team_off_epa8",
          "opp_def_epa8", "opp_allowed8", "week"]
+
+# Technique blocks promoted from the props_lab sweep (2026-08-13): each
+# improved walk-forward pinball and the gains stacked additively. None move
+# performance against closing lines — that gap is informational — but these
+# make the projections themselves measurably sharper.
+VOL_FEATS = ["team_vol8", "opp_vol_faced8", "share_t8", "share_trend"]
+NGS_FEATS = ["ngs_sep4", "ngs_air_share4", "ngs_xyac_gap4", "ngs_catch4",
+             "ngs_ryoe4"]
+VAC_FEATS = ["vacated_share", "n_out_skill"]
+FEATS_V2 = FEATS + VOL_FEATS + NGS_FEATS + VAC_FEATS
+
+# team volume pool feeding each stat's opportunities
+VOL_COL = {"passing_yards": "attempts", "rushing_yards": "carries",
+           "receiving_yards": "targets", "receptions": "targets"}
+TEAM_VOL = {"attempts": "attempts", "carries": "carries", "targets": "attempts"}
 
 
 def load_player_weeks() -> pd.DataFrame:
@@ -147,19 +162,129 @@ def build_stat_table(ps: pd.DataFrame, ctx: pd.DataFrame, stat: str) -> pd.DataF
     return d[d["y4"].notna() & (d["games_prior"] >= 2)].copy()
 
 
-def fit_quantiles(train: pd.DataFrame) -> dict:
+def load_ngs() -> pd.DataFrame:
+    """Next Gen Stats tracking-derived weekly features (2016+), receiving and
+    rushing merged, keyed by (season, week, gsis player id)."""
+    frames = []
+    for kind in ("receiving", "rushing"):
+        n = nfl.load_nextgen_stats(seasons=True, stat_type=kind).to_pandas()
+        n = n[n["week"] > 0]  # week 0 rows are season aggregates
+        cols = {"receiving": {
+                    "avg_separation": "ngs_sep",
+                    "percent_share_of_intended_air_yards": "ngs_air_share",
+                    "catch_percentage": "ngs_catch"},
+                "rushing": {
+                    "rush_yards_over_expected_per_att": "ngs_ryoe"}}[kind]
+        keep = ["season", "week", "player_gsis_id"] + list(cols)
+        if kind == "receiving":
+            n["xyac_gap"] = n["avg_yac"] - n["avg_expected_yac"]
+            keep.append("xyac_gap")
+        n = n[keep].rename(columns={**cols, "xyac_gap": "ngs_xyac_gap",
+                                    "player_gsis_id": "player_id"})
+        frames.append(n)
+    return frames[0].merge(frames[1], on=["season", "week", "player_id"],
+                           how="outer")
+
+
+def add_volume_block(d: pd.DataFrame, ps: pd.DataFrame, stat: str) -> pd.DataFrame:
+    """Game-script volume: the team's opportunity pool, what the opponent's
+    defense concedes, and the player's rolled share of his team's pool."""
+    pool_col = TEAM_VOL[VOL_COL[stat]]
+    tp = (ps.groupby(["season", "week", "team"])[pool_col].sum()
+          .reset_index().rename(columns={pool_col: "pool"}))
+    tp = tp.sort_values(["season", "week"])
+    tp["team_vol8"] = tp.groupby("team")["pool"].transform(
+        lambda s: s.shift(1).rolling(8, min_periods=3).mean())
+    d = d.merge(tp[["season", "week", "team", "pool", "team_vol8"]],
+                on=["season", "week", "team"], how="left")
+    fp = (ps.groupby(["season", "week", "opponent_team"])[pool_col].sum()
+          .reset_index().rename(columns={pool_col: "faced",
+                                         "opponent_team": "fdefteam"}))
+    fp = fp.sort_values(["season", "week"])
+    fp["opp_vol_faced8"] = fp.groupby("fdefteam")["faced"].transform(
+        lambda s: s.shift(1).rolling(8, min_periods=3).mean())
+    d = d.merge(fp[["season", "week", "fdefteam", "opp_vol_faced8"]],
+                left_on=["season", "week", "opp"],
+                right_on=["season", "week", "fdefteam"], how="left")
+    d["share_raw"] = d["use"] / d["pool"].replace(0, np.nan)
+    g = d.groupby("player_id")
+    d["share_t8"] = g["share_raw"].transform(
+        lambda s: s.shift(1).rolling(8, min_periods=2).mean())
+    share_t4 = g["share_raw"].transform(
+        lambda s: s.shift(1).rolling(4, min_periods=2).mean())
+    d["share_trend"] = share_t4 - d["share_t8"]
+    return d
+
+
+def add_ngs_block(d: pd.DataFrame, ngs: pd.DataFrame) -> pd.DataFrame:
+    d = d.merge(ngs, on=["season", "week", "player_id"], how="left")
+    g = d.groupby("player_id")
+    for col in ["ngs_sep", "ngs_air_share", "ngs_xyac_gap", "ngs_catch",
+                "ngs_ryoe"]:
+        d[f"{col}4"] = g[col].transform(
+            lambda s: s.shift(1).rolling(4, min_periods=1).mean())
+    return d
+
+
+def add_vacated_block(d: pd.DataFrame, injuries: dict) -> pd.DataFrame:
+    """Share of the team's volume pool vacated by skill players ruled Out
+    this week, valued at each absent player's own last-known rolling share."""
+    from features import norm_name as _norm
+    seq: dict = {}
+    tmp = d[["player_display_name", "season", "week", "team", "share_t8"]]
+    for r in tmp.sort_values(["season", "week"]).itertuples(index=False):
+        if pd.notna(r.share_t8):
+            seq.setdefault((r.team, _norm(r.player_display_name)), []).append(
+                (r.season * 100 + r.week, r.share_t8))
+
+    def share_asof(team, norm, key):
+        val = 0.0
+        for k, s in seq.get((team, norm), []):
+            if k >= key:
+                break
+            val = s
+        return val
+
+    vac, n_out = [], []
+    for r in d.itertuples(index=False):
+        rep = injuries.get((r.season, r.week, r.team))
+        key = r.season * 100 + r.week
+        total = cnt = 0.0
+        if rep:
+            for p in rep["out_players"]:
+                if p["group"] in ("wr", "te", "rb"):
+                    total += share_asof(r.team, p["norm"], key)
+                    cnt += 1
+        vac.append(total)
+        n_out.append(cnt)
+    d["vacated_share"] = vac
+    d["n_out_skill"] = n_out
+    return d
+
+
+def build_stat_table_v2(ps, ctx, stat, ngs, injuries) -> pd.DataFrame:
+    """The production table: base features + the promoted technique blocks."""
+    d = build_stat_table(ps, ctx, stat)
+    d = add_volume_block(d, ps, stat)
+    d = add_ngs_block(d, ngs)
+    d = add_vacated_block(d, injuries)
+    return d
+
+
+def fit_quantiles(train: pd.DataFrame, feats: list = FEATS) -> dict:
     models = {}
     for q in QUANTILES:
         m = XGBRegressor(**PARAMS, quantile_alpha=q)
-        m.fit(train[FEATS], train["y"])
+        m.fit(train[feats], train["y"])
         models[q] = m
     return models
 
 
-def predict_quantiles(models: dict, rows: pd.DataFrame) -> np.ndarray:
+def predict_quantiles(models: dict, rows: pd.DataFrame,
+                      feats: list = FEATS) -> np.ndarray:
     """(n, 5) quantile matrix, re-sorted row-wise: independently fit quantile
     models can cross, and a CDF must be monotone."""
-    preds = np.column_stack([models[q].predict(rows[FEATS]) for q in QUANTILES])
+    preds = np.column_stack([models[q].predict(rows[feats]) for q in QUANTILES])
     return np.maximum(np.sort(preds, axis=1), 0.0)
 
 
@@ -208,10 +333,12 @@ def naive_quantiles(test: pd.DataFrame, ps: pd.DataFrame, stat: str) -> np.ndarr
 def validate() -> None:
     ps = load_player_weeks()
     ctx = game_context()
+    ngs = load_ngs()
+    injuries = load_injury_reports()
     print(f"{'stat':16s} {'season':6s} {'n':>6s}  {'pinball':>8s} {'naive':>8s} "
           f"{'gain':>6s}  {'cov50':>6s} {'cov80':>6s}")
     for stat in STATS:
-        table = build_stat_table(ps, ctx, stat)
+        table = build_stat_table_v2(ps, ctx, stat, ngs, injuries)
         table = table[table["played"]]
         agg_n = agg_p = agg_b = 0.0
         for season in VALIDATE_SEASONS:
@@ -219,8 +346,8 @@ def validate() -> None:
             test = table[table.season == season]
             if test.empty:
                 continue
-            models = fit_quantiles(train)
-            pred = predict_quantiles(models, test)
+            models = fit_quantiles(train, FEATS_V2)
+            pred = predict_quantiles(models, test, FEATS_V2)
             y = test["y"].to_numpy()
             base = naive_quantiles(test, ps, stat)
             pb, nb = pinball(y, pred), pinball(y, base)
@@ -244,6 +371,9 @@ def upcoming_week(ctx: pd.DataFrame) -> tuple:
 def project() -> None:
     ps = load_player_weeks()
     ctx = game_context()
+    ngs = load_ngs()
+    injuries = load_injury_reports()
+    ngs_map = {pid: grp for pid, grp in ngs.groupby("player_id")}
     season, week = upcoming_week(ctx)
     week_ctx = ctx[(ctx.season == season) & (ctx.week == week)]
     print(f"Projecting {season} week {week} "
@@ -251,8 +381,26 @@ def project() -> None:
 
     out_rows = []
     for stat, (positions, use_col, min_use) in STATS.items():
-        table = build_stat_table(ps, ctx, stat)
-        models = fit_quantiles(table[table["played"]])
+        table = build_stat_table_v2(ps, ctx, stat, ngs, injuries)
+        models = fit_quantiles(table[table["played"]], FEATS_V2)
+
+        # Current-state lookups for the block features
+        pool_col = TEAM_VOL[VOL_COL[stat]]
+        tp = (ps.groupby(["season", "week", "team"])[pool_col].sum()
+              .reset_index().rename(columns={pool_col: "pool"})
+              .sort_values(["season", "week"]))
+        pool_map = {(r.season, r.week, r.team): r.pool
+                    for r in tp.itertuples(index=False)}
+        team_vol_now = tp.groupby("team")["pool"].apply(
+            lambda s: s.tail(8).mean()).to_dict()
+        fp = (ps.groupby(["season", "week", "opponent_team"])[pool_col].sum()
+              .reset_index().sort_values(["season", "week"]))
+        opp_faced_now = fp.groupby("opponent_team")[pool_col].apply(
+            lambda s: s.tail(8).mean()).to_dict()
+        played_t = table[table["played"] & table["share_t8"].notna()]
+        last_share = {(r.team, norm_name(r.player_display_name)): r.share_t8
+                      for r in played_t.sort_values(["season", "week"])
+                      .itertuples(index=False)}
 
         # Candidates: players seen in the last ~1.5 seasons, keyed to their
         # most recent team; rolling features come from their full tail.
@@ -274,6 +422,24 @@ def project() -> None:
             if game.empty:
                 continue  # bye week, or player's team not playing
             game = game.iloc[0]
+            shares = [u / pool_map[k] for u, k in zip(
+                h["use"], zip(h["season"], h["week"], h["team"]))
+                if pool_map.get(k)]
+            ngs_p = ngs_map.get(r.player_id)
+            ngs_tail = (ngs_p.tail(4) if ngs_p is not None else None)
+
+            def ngs_val(col):
+                if ngs_tail is None or ngs_tail[col].notna().sum() == 0:
+                    return np.nan
+                return float(ngs_tail[col].mean())
+
+            rep = injuries.get((season, week, r.team))
+            vac = n_out = 0.0
+            if rep:
+                for p in rep["out_players"]:
+                    if p["group"] in ("wr", "te", "rb"):
+                        vac += last_share.get((r.team, p["norm"]), 0.0)
+                        n_out += 1
             row = pd.DataFrame([{
                 "y4": tail4["y"].mean(), "y10": tail10["y"].mean(),
                 "ystd10": tail10["y"].std(), "use4": tail4["use"].mean(),
@@ -285,8 +451,19 @@ def project() -> None:
                 "opp_def_epa8": game.opp_def_epa8,
                 "opp_allowed8": allowed_now.get(game.opp, np.nan),
                 "week": week,
+                "team_vol8": team_vol_now.get(r.team, np.nan),
+                "opp_vol_faced8": opp_faced_now.get(game.opp, np.nan),
+                "share_t8": float(np.mean(shares[-8:])) if shares else np.nan,
+                "share_trend": (float(np.mean(shares[-4:]) - np.mean(shares[-8:]))
+                                if len(shares) >= 4 else np.nan),
+                "ngs_sep4": ngs_val("ngs_sep"),
+                "ngs_air_share4": ngs_val("ngs_air_share"),
+                "ngs_xyac_gap4": ngs_val("ngs_xyac_gap"),
+                "ngs_catch4": ngs_val("ngs_catch"),
+                "ngs_ryoe4": ngs_val("ngs_ryoe"),
+                "vacated_share": vac, "n_out_skill": n_out,
             }])
-            q = predict_quantiles(models, row)[0]
+            q = predict_quantiles(models, row, FEATS_V2)[0]
             out_rows.append({
                 "season": season, "week": week, "stat": stat,
                 "player_id": r.player_id, "player": r.player_display_name,

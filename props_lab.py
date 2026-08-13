@@ -22,23 +22,16 @@ from xgboost import XGBRegressor
 
 from features import load_injury_reports, norm_name
 from paper_trade import implied, payout
-from props import (FEATS, PARAMS, QUANTILES, STATS, build_stat_table,
-                   game_context, load_player_weeks, prob_over)
+from props import (FEATS, NGS_FEATS, PARAMS, QUANTILES, STATS, VAC_FEATS,
+                   VOL_COL, VOL_FEATS, add_ngs_block, add_vacated_block,
+                   add_volume_block, build_stat_table, game_context, load_ngs,
+                   load_player_weeks, prob_over)
 from real_props_backtest import LINES_DIR
 
 EVAL_SEASONS = [2023, 2024, 2025]
 LINE_SEASONS = [2024, 2025]
 RNG = np.random.default_rng(42)
 N_SIMS = 500
-
-VOL_COL = {"receiving_yards": "targets", "receptions": "targets",
-           "rushing_yards": "carries"}
-TEAM_VOL = {"targets": "attempts", "carries": "carries"}  # team volume pool
-
-VOL_FEATS = ["team_vol8", "opp_vol_faced8", "share_t8", "share_trend"]
-NGS_FEATS = ["ngs_sep4", "ngs_air_share4", "ngs_xyac_gap4", "ngs_catch4",
-             "ngs_ryoe4"]
-VAC_FEATS = ["vacated_share", "n_out_skill"]
 
 CONFIGS = {
     "gbm-base":  ("gbm", []),
@@ -49,119 +42,6 @@ CONFIGS = {
     "comp-base": ("comp", []),
     "comp+all":  ("comp", VOL_FEATS + NGS_FEATS + VAC_FEATS),
 }
-
-
-# ---------- technique feature blocks (all leak-free: shift(1) rolls) ----------
-
-def add_volume_block(d: pd.DataFrame, ps: pd.DataFrame, stat: str) -> pd.DataFrame:
-    """Game-script volume: how many opportunities the TEAM generates, how many
-    the opponent's defense faces, and the player's share of his team's pool."""
-    vol = VOL_COL[stat]
-    team_pool = TEAM_VOL[vol]
-    tp = (ps.groupby(["season", "week", "team"])[team_pool].sum()
-          .reset_index().rename(columns={team_pool: "pool"}))
-    tp = tp.sort_values(["season", "week"])
-    tp["team_vol8"] = tp.groupby("team")["pool"].transform(
-        lambda s: s.shift(1).rolling(8, min_periods=3).mean())
-    d = d.merge(tp[["season", "week", "team", "pool", "team_vol8"]],
-                on=["season", "week", "team"], how="left")
-    fp = (ps.groupby(["season", "week", "opponent_team"])[team_pool].sum()
-          .reset_index().rename(columns={team_pool: "faced",
-                                         "opponent_team": "defteam"}))
-    fp = fp.sort_values(["season", "week"])
-    fp["opp_vol_faced8"] = fp.groupby("defteam")["faced"].transform(
-        lambda s: s.shift(1).rolling(8, min_periods=3).mean())
-    d = d.merge(fp[["season", "week", "defteam", "opp_vol_faced8"]],
-                left_on=["season", "week", "opp"],
-                right_on=["season", "week", "defteam"],
-                how="left", suffixes=("", "_f"))
-    # Player's share of the team pool, rolled from his own past games.
-    d["share_raw"] = d["use"] / d["pool"].replace(0, np.nan)
-    g = d.groupby("player_id")
-    d["share_t8"] = g["share_raw"].transform(
-        lambda s: s.shift(1).rolling(8, min_periods=2).mean())
-    share_t4 = g["share_raw"].transform(
-        lambda s: s.shift(1).rolling(4, min_periods=2).mean())
-    d["share_trend"] = share_t4 - d["share_t8"]
-    return d
-
-
-def load_ngs() -> pd.DataFrame:
-    frames = []
-    for kind in ("receiving", "rushing"):
-        n = nfl.load_nextgen_stats(seasons=True, stat_type=kind).to_pandas()
-        n = n[n["week"] > 0]  # week 0 = season aggregate
-        cols = {"receiving": {
-                    "avg_separation": "ngs_sep",
-                    "percent_share_of_intended_air_yards": "ngs_air_share",
-                    "catch_percentage": "ngs_catch"},
-                "rushing": {
-                    "rush_yards_over_expected_per_att": "ngs_ryoe"}}[kind]
-        keep = ["season", "week", "player_gsis_id"] + list(cols)
-        if kind == "receiving":
-            n["xyac_gap"] = n["avg_yac"] - n["avg_expected_yac"]
-            keep.append("xyac_gap")
-        n = n[keep].rename(columns={**cols, "xyac_gap": "ngs_xyac_gap",
-                                    "player_gsis_id": "player_id"})
-        frames.append(n)
-    out = frames[0].merge(frames[1], on=["season", "week", "player_id"],
-                          how="outer")
-    return out
-
-
-def add_ngs_block(d: pd.DataFrame, ngs: pd.DataFrame) -> pd.DataFrame:
-    d = d.merge(ngs, on=["season", "week", "player_id"], how="left")
-    g = d.groupby("player_id")
-    for col in ["ngs_sep", "ngs_air_share", "ngs_xyac_gap", "ngs_catch",
-                "ngs_ryoe"]:
-        d[f"{col}4"] = g[col].transform(
-            lambda s: s.shift(1).rolling(4, min_periods=1).mean())
-    return d
-
-
-def add_vacated_block(d: pd.DataFrame, injuries: dict) -> pd.DataFrame:
-    """Share of team volume vacated by skill players ruled Out this week —
-    each Out teammate contributes his own last-known rolling share."""
-    share_hist = d[["player_id", "season", "week", "team", "share_t8"]].copy()
-    share_hist["norm"] = d["player_display_name"].map(norm_name)
-    last_share: dict = {}
-    for r in share_hist.sort_values(["season", "week"]).itertuples(index=False):
-        if pd.notna(r.share_t8):
-            last_share[(r.team, r.norm)] = (r.season * 100 + r.week, r.share_t8)
-
-    # last_share holds the FINAL value; rebuild as sorted series for as-of
-    seq: dict = {}
-    for r in share_hist.sort_values(["season", "week"]).itertuples(index=False):
-        if pd.notna(r.share_t8):
-            seq.setdefault((r.team, r.norm), []).append(
-                (r.season * 100 + r.week, r.share_t8))
-
-    def share_asof(team, norm, key):
-        hist = seq.get((team, norm))
-        if not hist:
-            return 0.0
-        val = 0.0
-        for k, s in hist:
-            if k >= key:
-                break
-            val = s
-        return val
-
-    vac, n_out = [], []
-    for r in d.itertuples(index=False):
-        rep = injuries.get((r.season, r.week, r.team))
-        key = r.season * 100 + r.week
-        total = cnt = 0.0
-        if rep:
-            for p in rep["out_players"]:
-                if p["group"] in ("wr", "te", "rb"):
-                    total += share_asof(r.team, p["norm"], key)
-                    cnt += 1
-        vac.append(total)
-        n_out.append(cnt)
-    d["vacated_share"] = vac
-    d["n_out_skill"] = n_out
-    return d
 
 
 # ---------- architectures ----------
