@@ -456,7 +456,19 @@
       '<button id="prevWk"' + (i === 0 ? " disabled" : "") + '>&larr; Wk ' + (i > 0 ? weeks[i - 1] : "") + "</button>" +
       '<span class="wk display">Week ' + week + "</span>" +
       '<button id="nextWk"' + (i === weeks.length - 1 ? " disabled" : "") + '>Wk ' + (i < weeks.length - 1 ? weeks[i + 1] : "") + " &rarr;</button></div>";
-    html += '<div class="games">' + wk.map(g => gameRow(g, null)).join("") + "</div>";
+    const byConfDesc = (a, b) => conf(b) - conf(a);
+    const starred = wk.filter(g => conf(g) >= 0.65).sort(byConfDesc);
+    const rest = wk.filter(g => conf(g) < 0.65).sort(byConfDesc);
+    if (starred.length) {
+      html += '<h2 class="section">&#9733; High confidence &mdash; ' + starred.length +
+        (starred.length === 1 ? " pick" : " picks") + ", 73% correct historically</h2>";
+      html += '<div class="games">' + starred.map(g => gameRow(g, null)).join("") + "</div>";
+    }
+    if (rest.length) {
+      html += '<h2 class="section">' +
+        (starred.length ? "Closer calls &mdash; leans, not locks" : "Games") + "</h2>";
+      html += '<div class="games">' + rest.map(g => gameRow(g, null)).join("") + "</div>";
+    }
     html += '<div class="legend"><span><span class="dot" style="background:var(--field)"></span>pick&rsquo;s win probability</span>' +
       '<span class="display">green code = predicted winner</span><span>click a game for the reasoning</span></div>';
     return html;
