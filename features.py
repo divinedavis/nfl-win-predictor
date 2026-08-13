@@ -95,6 +95,14 @@ TEAM_TZ = {
 }
 
 PYTH_EXP = 2.37          # NFL Pythagorean exponent
+
+# "Finishing" features: EPA/play in the last 5 minutes of one-score games,
+# rolled over 16 team-games (small per-game samples need the long window).
+# Improved walk-forward Brier in 11/11 backtest seasons (2026-08-13); the
+# same-window all-plays control added nothing, so the signal is situational
+# (late-game QB + pass rush), not generic team quality.
+CLUTCH_ROLL = 16
+CLUTCH_MIN_PLAYS = 40
 FTN_FIRST_SEASON = 2022  # FTN charting (blitz / pass-rusher counts) starts here
 # A season is "dead" for a team once even winning out can't reach this many
 # wins (playoffs realistically out of reach) — a nothing-to-play-for proxy.
@@ -363,6 +371,26 @@ def forecast_weather(home_team: str, gameday, gametime) -> tuple:
 
 def elo_win_prob(elo_diff: float) -> float:
     return 1.0 / (1.0 + 10.0 ** (-elo_diff / 400.0))
+
+
+def load_clutch_rolling() -> pd.DataFrame:
+    """Rolling last-5-min one-score EPA/play per (season, week, team), from
+    the build_clutch.py cache. Empty frame (all-NaN features) if absent."""
+    try:
+        c = pd.read_csv("clutch_team_weeks.csv")
+    except FileNotFoundError:
+        return pd.DataFrame(columns=["season", "week", "team",
+                                     "clutch_off16", "clutch_def16"])
+    c = c.sort_values(["season", "week"])
+    g = c.groupby("team")
+    for side in ("off", "def"):
+        epa_r = g[f"{side}_clutch_epa"].transform(
+            lambda s: s.shift(1).rolling(CLUTCH_ROLL, min_periods=8).sum())
+        plays_r = g[f"{side}_clutch_plays"].transform(
+            lambda s: s.shift(1).rolling(CLUTCH_ROLL, min_periods=8).sum())
+        rate = epa_r / plays_r.replace(0, np.nan)
+        c[f"clutch_{side}16"] = rate.where(plays_r >= CLUTCH_MIN_PLAYS)
+    return c[["season", "week", "team", "clutch_off16", "clutch_def16"]]
 
 
 def build_features() -> pd.DataFrame:
@@ -779,7 +807,19 @@ def build_features() -> pd.DataFrame:
     ]).sort_values("rating", ascending=False)
     ratings.to_csv("player_ratings.csv", index=False)
 
-    return pd.DataFrame(rows)
+    df = pd.DataFrame(rows)
+    clutch = load_clutch_rolling()
+    for side in ("home", "away"):
+        df = df.merge(
+            clutch.rename(columns={
+                "team": f"{side}_team",
+                "clutch_off16": f"{side}_clutch_off16",
+                "clutch_def16": f"{side}_clutch_def16"}),
+            on=["season", "week", f"{side}_team"], how="left")
+    df["clutch_net_diff"] = (
+        (df["home_clutch_off16"].fillna(0) - df["home_clutch_def16"].fillna(0))
+        - (df["away_clutch_off16"].fillna(0) - df["away_clutch_def16"].fillna(0)))
+    return df
 
 
 FEATURES = [
@@ -801,6 +841,8 @@ FEATURES = [
     "home_pf8", "home_pa8", "away_pf8", "away_pa8",
     "home_off_epa8", "away_off_epa8", "off_epa8_diff",
     "home_def_epa8", "away_def_epa8", "def_epa8_diff",
+    "home_clutch_off16", "home_clutch_def16",
+    "away_clutch_off16", "away_clutch_def16", "clutch_net_diff",
 ]
 
 # Candidate upset-indicator groups, ablation-tested by backtest_groups.py.

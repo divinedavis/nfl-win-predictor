@@ -10,6 +10,7 @@ LOG=refresh.log
 
 {
   echo "=== refresh $(date -Is) ==="
+  $PY build_clutch.py --update || echo "clutch refresh failed (non-fatal)"
   $PY features.py
   $PY train.py | tail -4
   $PY props.py || echo "props projection failed (non-fatal)"
