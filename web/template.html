@@ -144,7 +144,28 @@
     border: 1px solid var(--line);
     border-radius: 8px;
     padding: 10px 14px;
+    cursor: pointer;
   }
+  .game:hover { border-color: var(--field); }
+  .game:focus-visible { outline: 2px solid var(--field); outline-offset: 1px; }
+  .game .why {
+    grid-column: 1 / -1;
+    border-top: 1px dashed var(--line);
+    margin-top: 4px;
+    padding-top: 10px;
+    cursor: auto;
+  }
+  .why .why-label {
+    font-size: 0.7rem; font-weight: 600; text-transform: uppercase;
+    letter-spacing: 0.09em; color: var(--field); margin-bottom: 6px;
+  }
+  .why ul {
+    margin: 0; padding-left: 18px;
+    display: flex; flex-direction: column; gap: 5px;
+    font-size: 0.85rem; color: var(--muted);
+  }
+  .why li::marker { color: var(--field); }
+  .why li b { color: var(--ink); font-weight: 600; }
   .game .when { color: var(--muted); font-size: 0.78rem; line-height: 1.3; }
   .game .who { font-size: 1rem; }
   .game .who .code { font-weight: 700; }
@@ -260,6 +281,98 @@
       '" style="width:' + (p * 100).toFixed(0) + '%"></div><div class="mid"></div></div>';
   }
 
+  // ---- "why this pick" ----
+  const expanded = new Set();
+  const gid = g => g.week + ":" + g.away + "@" + g.home;
+  const signed = v => (v < 0 ? "−" : "+") + Math.abs(v).toFixed(1);
+  const pctOf = p => Math.round(p * 100) + "%";
+  const POS_NAMES = { qb: "QB", rb: "RB", wr: "WR", te: "TE",
+                      ol: "O-line", dl: "D-line", lb: "LB", db: "secondary" };
+
+  function whyBullets(g) {
+    const f = g.f || {}, pk = pick(g);
+    const opp = pk === g.home ? g.away : g.home;
+    const isHome = pk === g.home;
+    // read a factor from the pick's side / the opponent's side
+    const P = k => isHome ? f[k + "H"] : f[k + "A"];
+    const O = k => isHome ? f[k + "A"] : f[k + "H"];
+    const out = [];
+
+    if (f.eloProb != null && f.xgb != null) {
+      const eloP = isHome ? f.eloProb : 1 - f.eloProb;
+      const xgbP = isHome ? f.xgb : 1 - f.xgb;
+      out.push("<b>Two models, one number:</b> the Elo power rating gives " + pk + " " +
+        pctOf(eloP) + ", the XGBoost model (form, injuries, rest, weather) gives " +
+        pctOf(xgbP) + " — the pick is a 60/40 blend of the two: <b>" +
+        pctOf(probFor(pk, g)) + "</b>.");
+    }
+    if (f.eloH != null && f.eloA != null) {
+      out.push("<b>Power ratings:</b> " + g.home + " " + f.eloH + " vs " + g.away +
+        " " + f.eloA + ", with a +52 home-field bump to " + g.home +
+        " — the ratings carry each team’s full scoring history, updated every game.");
+    }
+    if (P("pdiff") != null && O("pdiff") != null) {
+      out.push("<b>Recent form (last 8 games):</b> " + pk + " " + signed(P("pdiff")) +
+        " points per game, winning " + Math.round(P("wr") * 100) + "% — " + opp + " " +
+        signed(O("pdiff")) + ", winning " + Math.round(O("wr") * 100) + "%.");
+    }
+    if (P("off") != null && O("off") != null && P("def") != null) {
+      out.push("<b>Efficiency (EPA per game, last 8):</b> offense " + pk + " " +
+        signed(P("off")) + " vs " + opp + " " + signed(O("off")) +
+        "; defense allowing " + pk + " " + signed(P("def")) + " vs " + opp + " " +
+        signed(O("def")) + " (lower allowed is better).");
+    }
+    if (f.restH != null && f.restA != null && f.restH !== f.restA) {
+      const rested = f.restH > f.restA ? g.home : g.away;
+      out.push("<b>Rest:</b> " + g.home + " on " + f.restH + " days, " + g.away +
+        " on " + f.restA + " — the extra recovery time counts for " + rested + ".");
+    }
+    // Injury report: for future games nflverse has no rows yet, which arrives
+    // here as zeros — say "not out yet", never "everyone is healthy".
+    const injTotal = (f.outH || 0) + (f.outA || 0) + (f.questH || 0) + (f.questA || 0);
+    const qbNote = (f.qbH ? " " + g.home + " has a QB change vs their last game." : "") +
+                   (f.qbA ? " " + g.away + " has a QB change vs their last game." : "");
+    if (injTotal > 0 || played(g)) {
+      let inj = "<b>Injury report:</b> " + g.home + " " + (f.outH || 0) + " out / " +
+        (f.questH || 0) + " questionable, " + g.away + " " + (f.outA || 0) + " out / " +
+        (f.questA || 0) + " questionable — each absence weighted by the player’s snap share.";
+      let worst = null;
+      for (const [side, pos] of [[g.home, f.posH || {}], [g.away, f.posA || {}]])
+        for (const [grp, w] of Object.entries(pos))
+          if (!worst || w > worst.w) worst = { side, grp, w };
+      if (worst) inj += " Biggest hit: the " + worst.side + " " + POS_NAMES[worst.grp] +
+        " group (" + worst.w.toFixed(1) + " full-time starters out).";
+      out.push(inj + qbNote);
+    } else {
+      out.push("<b>Injury report:</b> not out yet — reports land in game week" +
+        " and this number sharpens when they do." + qbNote);
+    }
+    if (f.dome) {
+      out.push("<b>Weather:</b> indoors — taken off the table.");
+    } else if (f.temp != null || f.wind != null) {
+      const w = [];
+      if (f.temp != null) w.push(f.temp + "°F");
+      if (f.wind != null) w.push(f.wind + " mph wind");
+      out.push("<b>Weather" + (played(g) ? "" : " forecast") + ":</b> " + w.join(", ") +
+        (f.wind >= 15 ? " — wind like that drags passing offenses" : "") + ".");
+    } else {
+      out.push("<b>Weather:</b> outdoors — the forecast joins the model inside 16 days of kickoff.");
+    }
+    if (f.div) {
+      out.push("<b>Division game:</b> familiarity runs these closer than the ratings suggest, and the model knows it.");
+    }
+    out.push(conf(g) >= 0.65
+      ? "<b>Confidence:</b> ★ at " + pctOf(conf(g)) + " this sits in the high-confidence tier — 73% correct across an 11-season backtest."
+      : "<b>Confidence:</b> " + pctOf(conf(g)) + " is below the 65% star line — treat it as a lean, not a lock.");
+    return out;
+  }
+
+  function whyPanel(g) {
+    return '<div class="why"><div class="why-label display">Why ' +
+      teams[pick(g)].name + "</div><ul>" +
+      whyBullets(g).map(b => "<li>" + b + "</li>").join("") + "</ul></div>";
+  }
+
   function gameRow(g, perspective) {
     const team = perspective || pick(g);
     const p = probFor(team, g);
@@ -285,10 +398,13 @@
       result = ' <span class="badge ' + (hit ? "hit" : "miss") + '">' +
         g.awayScore + "–" + g.homeScore + " " + (hit ? "HIT" : "MISS") + "</span>";
     }
-    return '<div class="game"><div class="when">Wk ' + g.week + "<br>" + fmtDate(g.date) +
+    const open = expanded.has(gid(g));
+    return '<div class="game" data-gid="' + gid(g) + '" role="button" tabindex="0" aria-expanded="' +
+      open + '"><div class="when">Wk ' + g.week + "<br>" + fmtDate(g.date) +
       '</div><div class="who">' + who + result + "</div>" +
       meter(perspective ? p : conf(g), perspective ? isDog : false) +
-      '<div class="pct">' + (starred ? '<span class="star">★</span> ' : "") + pctLabel + "</div></div>";
+      '<div class="pct">' + (starred ? '<span class="star">★</span> ' : "") + pctLabel + "</div>" +
+      (open ? whyPanel(g) : "") + "</div>";
   }
 
   function renderTeam(team) {
@@ -317,7 +433,7 @@
     html += '<div class="games">' + sched.map(g => gameRow(g, team)).join("") + "</div>";
     html += '<div class="legend"><span><span class="dot" style="background:var(--field)"></span>' + team +
       ' win probability</span><span><span class="dot" style="background:var(--dog)"></span>underdog</span>' +
-      "<span>marker at 50%</span></div>";
+      "<span>marker at 50%</span><span>click a game for the reasoning</span></div>";
     return html;
   }
 
@@ -331,7 +447,7 @@
       '<button id="nextWk"' + (i === weeks.length - 1 ? " disabled" : "") + '>Wk ' + (i < weeks.length - 1 ? weeks[i + 1] : "") + " &rarr;</button></div>";
     html += '<div class="games">' + wk.map(g => gameRow(g, null)).join("") + "</div>";
     html += '<div class="legend"><span><span class="dot" style="background:var(--field)"></span>pick&rsquo;s win probability</span>' +
-      '<span class="display">green code = predicted winner</span></div>';
+      '<span class="display">green code = predicted winner</span><span>click a game for the reasoning</span></div>';
     return html;
   }
 
@@ -366,5 +482,21 @@
       });
   }
   document.getElementById("allBtn").onclick = () => { selected = null; render(); };
+
+  // One delegated handler outlives every re-render. Clicks inside an open
+  // panel don't toggle it shut — the reader may be selecting text.
+  function toggleGame(e) {
+    if (e.target.closest(".why")) return;
+    const row = e.target.closest(".game[data-gid]");
+    if (!row) return;
+    const id = row.dataset.gid;
+    expanded.has(id) ? expanded.delete(id) : expanded.add(id);
+    render();
+  }
+  const mainEl = document.getElementById("main");
+  mainEl.addEventListener("click", toggleGame);
+  mainEl.addEventListener("keydown", e => {
+    if (e.key === "Enter" || e.key === " ") { e.preventDefault(); toggleGame(e); }
+  });
   render();
 </script>

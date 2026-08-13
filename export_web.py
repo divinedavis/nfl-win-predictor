@@ -11,7 +11,7 @@ from pathlib import Path
 import pandas as pd
 from xgboost import XGBClassifier
 
-from features import FEATURES, LAST_SEASON
+from features import FEATURES, LAST_SEASON, POS_GROUPS
 from train import ELO_BLEND
 
 TEAMS = {
@@ -34,17 +34,47 @@ TEAMS = {
 }
 
 
+def _f(x, nd=2):
+    """Round for the payload; NaN → None so the page can say "no data yet"
+    instead of rendering the string "nan"."""
+    if x is None or pd.isna(x):
+        return None
+    v = round(float(x), nd)
+    return int(v) if nd == 0 else v
+
+
 def main() -> None:
     df = pd.read_parquet("features.parquet")
     season = df[(df.season == LAST_SEASON) & (df.game_type == "REG")].copy()
 
     model = XGBClassifier()
     model.load_model("model.json")
-    raw = model.predict_proba(season[FEATURES])[:, 1]
-    season["home_prob"] = (1 - ELO_BLEND) * raw + ELO_BLEND * season["elo_prob"]
+    season["xgb_raw"] = model.predict_proba(season[FEATURES])[:, 1]
+    season["home_prob"] = ((1 - ELO_BLEND) * season["xgb_raw"]
+                           + ELO_BLEND * season["elo_prob"])
 
     games = []
     for r in season.sort_values(["week", "gameday"]).itertuples(index=False):
+        # Everything the "why this pick" panel cites, keyed H/A. Kept raw —
+        # the page does the phrasing, so wording can follow the pick.
+        factors = {
+            "eloH": _f(r.elo_home, 0), "eloA": _f(r.elo_away, 0),
+            "eloProb": _f(r.elo_prob, 3), "xgb": _f(r.xgb_raw, 3),
+            "restH": _f(r.home_rest, 0), "restA": _f(r.away_rest, 0),
+            "div": bool(r.div_game), "dome": bool(r.is_dome),
+            "temp": _f(r.temp, 0), "wind": _f(r.wind, 0),
+            "outH": _f(r.home_n_out, 0), "outA": _f(r.away_n_out, 0),
+            "questH": _f(r.home_n_quest, 0), "questA": _f(r.away_n_quest, 0),
+            "qbH": _f(r.home_qb_changed, 0), "qbA": _f(r.away_qb_changed, 0),
+            "posH": {grp: w for grp in POS_GROUPS
+                     if (w := _f(getattr(r, f"home_{grp}_out_wt"))) },
+            "posA": {grp: w for grp in POS_GROUPS
+                     if (w := _f(getattr(r, f"away_{grp}_out_wt"))) },
+            "pdiffH": _f(r.home_pdiff8, 1), "pdiffA": _f(r.away_pdiff8, 1),
+            "wrH": _f(r.home_winrate8), "wrA": _f(r.away_winrate8),
+            "offH": _f(r.home_off_epa8, 1), "offA": _f(r.away_off_epa8, 1),
+            "defH": _f(r.home_def_epa8, 1), "defA": _f(r.away_def_epa8, 1),
+        }
         games.append({
             "week": int(r.week),
             "date": pd.Timestamp(r.gameday).strftime("%Y-%m-%d"),
@@ -53,6 +83,7 @@ def main() -> None:
             "homeProb": round(float(r.home_prob), 3),
             "awayScore": None if pd.isna(r.away_score) else int(r.away_score),
             "homeScore": None if pd.isna(r.home_score) else int(r.home_score),
+            "f": factors,
         })
 
     data = {
