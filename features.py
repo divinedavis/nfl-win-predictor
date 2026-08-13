@@ -83,6 +83,23 @@ STADIUMS = {
     "TEN": (36.1665, -86.7713), "WAS": (38.9076, -76.8645),
 }
 
+# Hours behind Eastern for each team's home market (upset-indicator features:
+# body-clock disadvantage for west-coast teams in early Eastern kickoffs).
+TEAM_TZ = {
+    "BUF": 0, "MIA": 0, "NE": 0, "NYJ": 0, "NYG": 0, "PHI": 0, "PIT": 0,
+    "WAS": 0, "BAL": 0, "CIN": 0, "CLE": 0, "ATL": 0, "CAR": 0, "JAX": 0,
+    "TB": 0, "IND": 0, "DET": 0,
+    "CHI": 1, "GB": 1, "MIN": 1, "DAL": 1, "HOU": 1, "TEN": 1, "KC": 1, "NO": 1,
+    "DEN": 2, "ARI": 2,
+    "LA": 3, "LAC": 3, "LV": 3, "SEA": 3, "SF": 3,
+}
+
+PYTH_EXP = 2.37          # NFL Pythagorean exponent
+FTN_FIRST_SEASON = 2022  # FTN charting (blitz / pass-rusher counts) starts here
+# A season is "dead" for a team once even winning out can't reach this many
+# wins (playoffs realistically out of reach) — a nothing-to-play-for proxy.
+PLAYOFF_WINS = 9
+
 ELO_START = 1505.0
 ELO_MEAN = 1505.0
 ELO_K = 20.0
@@ -108,22 +125,65 @@ def load_games() -> pd.DataFrame:
 
 
 def load_team_epa() -> pd.DataFrame:
-    """Per team-game offensive EPA, keyed by (season, week, team)."""
-    cols = ["season", "week", "team", "passing_epa", "rushing_epa"]
+    """Per team-game offensive EPA, turnover margin, and sack counts,
+    keyed by (season, week, team)."""
+    cols = ["season", "week", "team", "passing_epa", "rushing_epa",
+            "passing_interceptions", "fumbles_lost_total",
+            "def_interceptions", "fumble_recovery_opp",
+            "sacks_suffered", "def_sacks"]
     frames = []
     for season in range(FIRST_SEASON, LAST_SEASON + 1):
         try:
-            frames.append(
-                nfl.load_team_stats([season], summary_level="week")
-                .to_pandas()[cols]
-            )
+            df = nfl.load_team_stats([season], summary_level="week").to_pandas()
+            frames.append(df.reindex(columns=cols))
         except Exception:
             # Season not published yet (e.g. upcoming season before kickoff).
             continue
     ts = pd.concat(frames, ignore_index=True)
     ts["team"] = ts["team"].map(canon)
     ts["off_epa"] = ts["passing_epa"].fillna(0) + ts["rushing_epa"].fillna(0)
-    return ts[["season", "week", "team", "off_epa"]]
+    ts["to_margin"] = (
+        ts["def_interceptions"].fillna(0) + ts["fumble_recovery_opp"].fillna(0)
+        - ts["passing_interceptions"].fillna(0) - ts["fumbles_lost_total"].fillna(0)
+    )
+    return ts[["season", "week", "team", "off_epa", "to_margin",
+               "sacks_suffered", "def_sacks"]]
+
+
+def load_ftn_defense() -> dict:
+    """(season, week, defense_team) -> (blitz_rate, avg_pass_rushers) from FTN
+    charting (2022+). Charted plays carry no team, so join to play-by-play."""
+    index: dict = {}
+    for season in range(FTN_FIRST_SEASON, LAST_SEASON + 1):
+        try:
+            # Column-trim in polars BEFORE the pandas copy: full pbp is ~400
+            # columns and the droplet only has 2GB of RAM.
+            ftn = nfl.load_ftn_charting([season]).select(
+                ["nflverse_game_id", "nflverse_play_id", "season", "week",
+                 "n_blitzers", "n_pass_rushers"]).to_pandas()
+            pbp = nfl.load_pbp([season]).select(
+                ["game_id", "play_id", "defteam"]).to_pandas()
+        except Exception:
+            continue  # season not charted/published yet
+        m = ftn.merge(pbp, left_on=["nflverse_game_id", "nflverse_play_id"],
+                      right_on=["game_id", "play_id"], how="inner")
+        m = m[m["defteam"].notna()]
+        m["defteam"] = m["defteam"].map(canon)
+        m["blitz"] = (m["n_blitzers"].fillna(0) > 0).astype(float)
+        agg = m.groupby(["season", "week", "defteam"]).agg(
+            blitz_rate=("blitz", "mean"),
+            rushers=("n_pass_rushers", "mean"),
+        )
+        for (s, w, team), r in agg.iterrows():
+            index[(s, w, team)] = (float(r.blitz_rate), float(r.rushers))
+    return index
+
+
+def haversine_miles(a: tuple, b: tuple) -> float:
+    lat1, lon1, lat2, lon2 = map(math.radians, (*a, *b))
+    h = (math.sin((lat2 - lat1) / 2) ** 2
+         + math.cos(lat1) * math.cos(lat2) * math.sin((lon2 - lon1) / 2) ** 2)
+    return 3958.8 * 2 * math.asin(math.sqrt(h))
 
 
 def norm_name(name: str) -> str:
@@ -311,6 +371,11 @@ def build_features() -> pd.DataFrame:
     epa_map = {
         (r.season, r.week, r.team): r.off_epa for r in epa.itertuples(index=False)
     }
+    stat_map = {
+        (r.season, r.week, r.team): (r.to_margin, r.sacks_suffered, r.def_sacks)
+        for r in epa.itertuples(index=False)
+    }
+    ftn_map = load_ftn_defense()
     injuries = load_injury_reports()
     snaps = load_snap_index()
     player_values = load_player_value_index()
@@ -320,6 +385,24 @@ def build_features() -> pd.DataFrame:
     season_of: dict[str, int] = {}
     # Per-team chronological history of completed games (newest last).
     hist: dict[str, list[dict]] = {}
+    # Regular-season record to date, for the nothing-to-play-for flag.
+    season_wins: dict[str, float] = {}
+    season_played: dict[str, int] = {}
+
+    # Next regular-season opponent per (game_id, team) — the schedule is public
+    # all season, so a lookahead feature built from it is leak-free. Playoff
+    # opponents are excluded: they weren't known during the regular season.
+    next_opp: dict[tuple, str] = {}
+    reg = games[games["game_type"] == "REG"]
+    team_sched: dict[tuple, list] = {}
+    for g in reg.itertuples(index=False):
+        team_sched.setdefault((g.season, g.home_team), []).append(
+            (g.game_id, g.away_team))
+        team_sched.setdefault((g.season, g.away_team), []).append(
+            (g.game_id, g.home_team))
+    for (_, team), sched in team_sched.items():
+        for (gid, _), (_, upcoming) in zip(sched, sched[1:]):
+            next_opp[(gid, team)] = upcoming
     last_qb: dict[str, str] = {}  # team -> gsis_id of most recent starter
     # (name, group) -> recent snap shares (newest last), updated post-game so
     # lookups during feature building only ever see pregame information.
@@ -426,24 +509,79 @@ def build_features() -> pd.DataFrame:
             # Offseason reversion the first time a team appears in a new season.
             if season_of.get(team) is not None and season_of[team] != g.season:
                 elo[team] = elo[team] + ELO_REVERT * (ELO_MEAN - elo[team])
+            if season_of.get(team) != g.season:
+                season_wins[team] = 0.0
+                season_played[team] = 0
             season_of[team] = g.season
 
         def roll(team: str) -> dict:
             past = hist[team][-ROLL_N:]
+            keys = ["pdiff", "winrate", "pf", "pa", "off_epa", "def_epa",
+                    "pyth", "luck", "to_margin", "sacked", "def_sacks",
+                    "blitz_rate", "rushers"]
             if not past:
-                return {"pdiff": np.nan, "winrate": np.nan, "pf": np.nan,
-                        "pa": np.nan, "off_epa": np.nan, "def_epa": np.nan}
-            return {
+                return dict.fromkeys(keys, np.nan)
+            out = {
                 "pdiff": np.mean([p["pf"] - p["pa"] for p in past]),
                 "winrate": np.mean([p["won"] for p in past]),
                 "pf": np.mean([p["pf"] for p in past]),
                 "pa": np.mean([p["pa"] for p in past]),
-                "off_epa": np.nanmean([p["off_epa"] for p in past]),
-                "def_epa": np.nanmean([p["def_epa"] for p in past]),
             }
+            for k in keys[4:]:
+                if k in ("pyth", "luck"):
+                    continue
+                with np.errstate(all="ignore"):
+                    vals = [p.get(k, np.nan) for p in past]
+                    out[k] = np.nan if all(pd.isna(v) for v in vals) else np.nanmean(vals)
+            # Pythagorean expectation from rolling points; "luck" is how far
+            # the record outruns it (winning close games, turnover bounces) —
+            # the classic regression-candidate profile of a fake favorite.
+            pf_e, pa_e = out["pf"] ** PYTH_EXP, out["pa"] ** PYTH_EXP
+            out["pyth"] = pf_e / (pf_e + pa_e) if pf_e + pa_e > 0 else 0.5
+            out["luck"] = out["winrate"] - out["pyth"]
+            return out
 
         rh, ra = roll(home), roll(away)
         elo_diff = elo[home] + ELO_HFA - elo[away]
+
+        # --- situational spots (all from public pregame info) ---
+        def letdown(team: str) -> float:
+            """Coming off an emotional divisional win — the classic flat spot."""
+            past = hist[team]
+            return float(past[-1].get("div_win", 0.0)) if past else np.nan
+
+        def lookahead(team: str, opponent: str) -> float:
+            """How much stronger the NEXT opponent is than today's — a big gap
+            invites looking past a weak opponent. Zero at season end."""
+            if g.game_type != "REG":
+                return 0.0
+            nxt = next_opp.get((g.game_id, team))
+            if nxt is None:
+                return 0.0
+            return elo.get(nxt, ELO_START) - elo.get(opponent, ELO_START)
+
+        def low_stakes(team: str) -> float:
+            """Nothing left to play for: mathematically dead-ish (can't reach
+            PLAYOFF_WINS even winning out) or locked up late (resting risk)."""
+            if g.game_type != "REG":
+                return 0.0
+            total = 17 if g.season >= 2021 else 16
+            wins = season_wins.get(team, 0.0)
+            remaining = total - season_played.get(team, 0)
+            return float(wins + remaining < PLAYOFF_WINS
+                         or (wins >= 12 and g.week >= 17))
+
+        # --- travel / body clock for the road team ---
+        h_coord, a_coord = STADIUMS.get(home), STADIUMS.get(away)
+        away_travel = (haversine_miles(a_coord, h_coord)
+                       if h_coord and a_coord else np.nan)
+        h_tz, a_tz = TEAM_TZ.get(home), TEAM_TZ.get(away)
+        tz_shift = (a_tz - h_tz) if h_tz is not None and a_tz is not None else np.nan
+        hour = 16
+        if isinstance(g.gametime, str) and ":" in g.gametime:
+            hour = int(g.gametime.split(":")[0])
+        west_early = float(a_tz is not None and h_tz is not None
+                           and a_tz >= 2 and h_tz <= 1 and hour <= 13)
 
         # Injury report counts (NaN before 2009; 0 = reports exist, none listed).
         def inj_counts(team: str) -> tuple:
@@ -550,6 +688,26 @@ def build_features() -> pd.DataFrame:
             "home_def_epa8": rh["def_epa"], "away_def_epa8": ra["def_epa"],
             "off_epa8_diff": rh["off_epa"] - ra["off_epa"],
             "def_epa8_diff": rh["def_epa"] - ra["def_epa"],
+            # --- upset indicators (candidate features, ablation-tested) ---
+            "home_pyth8": rh["pyth"], "away_pyth8": ra["pyth"],
+            "home_luck8": rh["luck"], "away_luck8": ra["luck"],
+            "luck8_diff": rh["luck"] - ra["luck"],
+            "home_to_margin8": rh["to_margin"], "away_to_margin8": ra["to_margin"],
+            "to_margin8_diff": rh["to_margin"] - ra["to_margin"],
+            "home_sacked8": rh["sacked"], "away_sacked8": ra["sacked"],
+            "home_def_sacks8": rh["def_sacks"], "away_def_sacks8": ra["def_sacks"],
+            # positive = home QB in more danger than away QB
+            "sack_mismatch": (rh["sacked"] + ra["def_sacks"])
+            - (ra["sacked"] + rh["def_sacks"]),
+            "home_blitz_rate8": rh["blitz_rate"], "away_blitz_rate8": ra["blitz_rate"],
+            "home_rushers8": rh["rushers"], "away_rushers8": ra["rushers"],
+            "away_travel": away_travel,
+            "tz_shift": tz_shift,
+            "west_early": west_early,
+            "home_letdown": letdown(home), "away_letdown": letdown(away),
+            "home_lookahead": lookahead(home, away),
+            "away_lookahead": lookahead(away, home),
+            "home_low_stakes": low_stakes(home), "away_low_stakes": low_stakes(away),
             # --- benchmark (NOT a model feature): Vegas closing spread ---
             "spread_line": g.spread_line,
             # --- target ---
@@ -572,12 +730,30 @@ def build_features() -> pd.DataFrame:
 
             h_epa = epa_map.get((g.season, g.week, home), np.nan)
             a_epa = epa_map.get((g.season, g.week, away), np.nan)
+
+            def game_stats(team: str) -> dict:
+                to, sacked, dsacks = stat_map.get(
+                    (g.season, g.week, team), (np.nan, np.nan, np.nan))
+                blitz, rushers = ftn_map.get(
+                    (g.season, g.week, team), (np.nan, np.nan))
+                return {"to_margin": to, "sacked": sacked, "def_sacks": dsacks,
+                        "blitz_rate": blitz, "rushers": rushers}
+
             hist[home].append({"pf": g.home_score, "pa": g.away_score,
                                "won": float(margin > 0), "off_epa": h_epa,
-                               "def_epa": a_epa})
+                               "def_epa": a_epa,
+                               "div_win": float(margin > 0 and g.div_game == 1),
+                               **game_stats(home)})
             hist[away].append({"pf": g.away_score, "pa": g.home_score,
                                "won": float(margin < 0), "off_epa": a_epa,
-                               "def_epa": h_epa})
+                               "def_epa": h_epa,
+                               "div_win": float(margin < 0 and g.div_game == 1),
+                               **game_stats(away)})
+            if g.game_type == "REG":
+                season_wins[home] = season_wins.get(home, 0.0) + float(margin > 0)
+                season_wins[away] = season_wins.get(away, 0.0) + float(margin < 0)
+                season_played[home] = season_played.get(home, 0) + 1
+                season_played[away] = season_played.get(away, 0) + 1
             if pd.notna(g.home_qb_id):
                 last_qb[home] = g.home_qb_id
             if pd.notna(g.away_qb_id):
@@ -626,6 +802,22 @@ FEATURES = [
     "home_off_epa8", "away_off_epa8", "off_epa8_diff",
     "home_def_epa8", "away_def_epa8", "def_epa8_diff",
 ]
+
+# Candidate upset-indicator groups, ablation-tested by backtest_groups.py.
+# Promote a group into FEATURES only if it improves the walk-forward Brier.
+CANDIDATE_GROUPS = {
+    "luck": ["home_pyth8", "away_pyth8", "home_luck8", "away_luck8",
+             "luck8_diff", "home_to_margin8", "away_to_margin8",
+             "to_margin8_diff"],
+    "sacks": ["home_sacked8", "away_sacked8", "home_def_sacks8",
+              "away_def_sacks8", "sack_mismatch"],
+    "ftn": ["home_blitz_rate8", "away_blitz_rate8",
+            "home_rushers8", "away_rushers8"],
+    "travel": ["away_travel", "tz_shift", "west_early"],
+    "situational": ["home_letdown", "away_letdown",
+                    "home_lookahead", "away_lookahead",
+                    "home_low_stakes", "away_low_stakes"],
+}
 
 
 if __name__ == "__main__":
