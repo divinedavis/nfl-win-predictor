@@ -1,0 +1,370 @@
+<title>Gridiron Odds</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  :root {
+    --bg: #F5F4EF;
+    --surface: #FFFFFF;
+    --ink: #1C2734;
+    --muted: #5C6675;
+    --line: #E4E2D9;
+    --field: #2E7D46;
+    --field-soft: #E4F0E7;
+    --star: #A87B1F;
+    --star-soft: #F4EBD7;
+    --track: #ECEAE1;
+    --dog: #9AA3AD;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #12181F;
+      --surface: #1B232D;
+      --ink: #E8EBEE;
+      --muted: #94A1AD;
+      --line: #2A3541;
+      --field: #4CAB6E;
+      --field-soft: #20342A;
+      --star: #E0B24A;
+      --star-soft: #33301F;
+      --track: #26303B;
+      --dog: #55616D;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #12181F;
+    --surface: #1B232D;
+    --ink: #E8EBEE;
+    --muted: #94A1AD;
+    --line: #2A3541;
+    --field: #4CAB6E;
+    --field-soft: #20342A;
+    --star: #E0B24A;
+    --star-soft: #33301F;
+    --track: #26303B;
+    --dog: #55616D;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--ink);
+    font: 16px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+  .display {
+    font-family: "Avenir Next Condensed", "Helvetica Neue Condensed",
+      "Arial Narrow", system-ui, sans-serif;
+    letter-spacing: 0.01em;
+  }
+  .wrap { max-width: 860px; margin: 0 auto; padding: 0 20px 64px; }
+
+  header { padding: 28px 0 18px; border-bottom: 3px solid var(--ink); }
+  .masthead { display: flex; align-items: baseline; gap: 14px; flex-wrap: wrap; }
+  h1 {
+    margin: 0;
+    font-family: "Avenir Next Condensed", "Helvetica Neue Condensed",
+      "Arial Narrow", system-ui, sans-serif;
+    font-size: 2.6rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.02em;
+    text-wrap: balance;
+  }
+  h1 .season { color: var(--field); }
+  .tagline { color: var(--muted); font-size: 0.9rem; }
+
+  .picker { margin: 22px 0 6px; }
+  .picker-label {
+    font-size: 0.72rem; font-weight: 600; text-transform: uppercase;
+    letter-spacing: 0.09em; color: var(--muted); margin-bottom: 8px;
+  }
+  .conf-row { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; align-items: center; }
+  .conf-tag {
+    font-size: 0.72rem; font-weight: 700; letter-spacing: 0.06em;
+    color: var(--muted); width: 34px; flex: none;
+  }
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; }
+  .chip {
+    border: 1px solid var(--line);
+    background: var(--surface);
+    color: var(--ink);
+    border-radius: 6px;
+    padding: 5px 9px;
+    font-family: "Avenir Next Condensed", "Arial Narrow", system-ui, sans-serif;
+    font-size: 0.88rem;
+    font-weight: 600;
+    cursor: pointer;
+  }
+  .chip:hover { border-color: var(--field); }
+  .chip:focus-visible { outline: 2px solid var(--field); outline-offset: 1px; }
+  .chip[aria-pressed="true"] {
+    background: var(--field); border-color: var(--field); color: #fff;
+  }
+  .chip.all { font-family: system-ui, sans-serif; font-size: 0.8rem; }
+
+  .hero {
+    margin: 24px 0 8px;
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-left: 4px solid var(--field);
+    border-radius: 10px;
+    padding: 18px 20px 20px;
+  }
+  .hero .eyebrow {
+    font-size: 0.72rem; font-weight: 600; text-transform: uppercase;
+    letter-spacing: 0.09em; color: var(--field); margin-bottom: 4px;
+  }
+  .hero .matchup { font-size: 1.7rem; font-weight: 700; }
+  .hero .sub { color: var(--muted); font-size: 0.9rem; margin-top: 2px; }
+  .hero .bignum {
+    font-size: 2.6rem; font-weight: 700; font-variant-numeric: tabular-nums;
+    line-height: 1.1; margin-top: 10px;
+  }
+  .hero .bignum small { font-size: 1rem; font-weight: 500; color: var(--muted); }
+
+  .weeknav { display: flex; align-items: center; gap: 10px; margin: 26px 0 4px; }
+  .weeknav button {
+    border: 1px solid var(--line); background: var(--surface); color: var(--ink);
+    border-radius: 6px; padding: 4px 12px; font-size: 0.9rem; cursor: pointer;
+  }
+  .weeknav button:disabled { opacity: 0.35; cursor: default; }
+  .weeknav button:focus-visible { outline: 2px solid var(--field); }
+  .weeknav .wk { font-weight: 700; font-size: 1.05rem; min-width: 84px; text-align: center; }
+
+  h2.section {
+    font-size: 0.78rem; font-weight: 600; text-transform: uppercase;
+    letter-spacing: 0.09em; color: var(--muted);
+    margin: 26px 0 10px; padding-bottom: 6px; border-bottom: 1px solid var(--line);
+  }
+  .games { display: flex; flex-direction: column; gap: 8px; }
+  .game {
+    display: grid;
+    grid-template-columns: 52px 1fr 150px 64px;
+    gap: 12px;
+    align-items: center;
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    padding: 10px 14px;
+  }
+  .game .when { color: var(--muted); font-size: 0.78rem; line-height: 1.3; }
+  .game .who { font-size: 1rem; }
+  .game .who .code { font-weight: 700; }
+  .game .who .fav { color: var(--field); }
+  .game .who .sub { color: var(--muted); font-size: 0.8rem; }
+  .meter { height: 8px; background: var(--track); border-radius: 4px; position: relative; }
+  .meter .fill {
+    position: absolute; inset: 0 auto 0 0; border-radius: 4px;
+    background: var(--field); min-width: 4px;
+  }
+  .meter .fill.dog { background: var(--dog); }
+  .meter .mid {
+    position: absolute; left: 50%; top: -2px; bottom: -2px;
+    width: 1px; background: var(--muted); opacity: 0.5;
+  }
+  .game .pct {
+    font-variant-numeric: tabular-nums; font-weight: 700; text-align: right;
+    font-size: 0.98rem;
+  }
+  .game .pct .star { color: var(--star); }
+  .badge {
+    display: inline-block; border-radius: 5px; padding: 1px 7px;
+    font-size: 0.72rem; font-weight: 700; letter-spacing: 0.04em;
+  }
+  .badge.hit { background: var(--field-soft); color: var(--field); }
+  .badge.miss { background: var(--track); color: var(--muted); }
+  .badge.starred { background: var(--star-soft); color: var(--star); }
+
+  .legend { display: flex; gap: 16px; flex-wrap: wrap; margin: 14px 0 0; color: var(--muted); font-size: 0.8rem; }
+  .legend .dot { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 5px; vertical-align: -1px; }
+
+  footer {
+    margin-top: 40px; padding-top: 16px; border-top: 1px solid var(--line);
+    color: var(--muted); font-size: 0.82rem;
+  }
+  footer p { margin: 0 0 8px; max-width: 65ch; }
+  @media (max-width: 560px) {
+    .game { grid-template-columns: 44px 1fr 72px; }
+    .game .meter { display: none; }
+    h1 { font-size: 2rem; }
+  }
+  @media (prefers-reduced-motion: no-preference) {
+    .meter .fill { transition: width 240ms ease; }
+  }
+</style>
+
+<div class="wrap">
+  <header>
+    <div class="masthead">
+      <h1>Gridiron Odds <span class="season" id="seasonLabel"></span></h1>
+      <span class="tagline display" id="genLabel"></span>
+    </div>
+  </header>
+
+  <div class="picker">
+    <div class="picker-label">Pick your team</div>
+    <div class="conf-row">
+      <span class="conf-tag">AFC</span>
+      <div class="chips" id="afcChips"></div>
+    </div>
+    <div class="conf-row">
+      <span class="conf-tag">NFC</span>
+      <div class="chips" id="nfcChips"></div>
+    </div>
+    <div class="conf-row">
+      <span class="conf-tag"></span>
+      <div class="chips"><button class="chip all" id="allBtn" aria-pressed="true">All games, week by week</button></div>
+    </div>
+  </div>
+
+  <main id="main"></main>
+
+  <footer>
+    <p><span class="badge starred">&#9733; high confidence</span> marks picks at
+    &ge;65% win probability &mdash; in an 11-season backtest those hit at 73%,
+    while all picks together hit 64.9% (the Vegas closing line manages 66%).</p>
+    <p>Probabilities come from an Elo rating blended with an XGBoost model using
+    team form, EPA, rest, weather forecasts, and snap-weighted injury reports.
+    Numbers reflect data as of the date above and sharpen as kickoff nears
+    &mdash; injury reports and forecasts only exist in game week.</p>
+  </footer>
+</div>
+
+<script>
+  const DATA = {"season":2026,"generated":"2026-08-13","teams":{"BUF":{"name":"Buffalo Bills","division":"AFC East"},"MIA":{"name":"Miami Dolphins","division":"AFC East"},"NE":{"name":"New England Patriots","division":"AFC East"},"NYJ":{"name":"New York Jets","division":"AFC East"},"BAL":{"name":"Baltimore Ravens","division":"AFC North"},"CIN":{"name":"Cincinnati Bengals","division":"AFC North"},"CLE":{"name":"Cleveland Browns","division":"AFC North"},"PIT":{"name":"Pittsburgh Steelers","division":"AFC North"},"HOU":{"name":"Houston Texans","division":"AFC South"},"IND":{"name":"Indianapolis Colts","division":"AFC South"},"JAX":{"name":"Jacksonville Jaguars","division":"AFC South"},"TEN":{"name":"Tennessee Titans","division":"AFC South"},"DEN":{"name":"Denver Broncos","division":"AFC West"},"KC":{"name":"Kansas City Chiefs","division":"AFC West"},"LV":{"name":"Las Vegas Raiders","division":"AFC West"},"LAC":{"name":"Los Angeles Chargers","division":"AFC West"},"DAL":{"name":"Dallas Cowboys","division":"NFC East"},"NYG":{"name":"New York Giants","division":"NFC East"},"PHI":{"name":"Philadelphia Eagles","division":"NFC East"},"WAS":{"name":"Washington Commanders","division":"NFC East"},"CHI":{"name":"Chicago Bears","division":"NFC North"},"DET":{"name":"Detroit Lions","division":"NFC North"},"GB":{"name":"Green Bay Packers","division":"NFC North"},"MIN":{"name":"Minnesota Vikings","division":"NFC North"},"ATL":{"name":"Atlanta Falcons","division":"NFC South"},"CAR":{"name":"Carolina Panthers","division":"NFC South"},"NO":{"name":"New Orleans Saints","division":"NFC South"},"TB":{"name":"Tampa Bay Buccaneers","division":"NFC South"},"ARI":{"name":"Arizona Cardinals","division":"NFC West"},"LA":{"name":"Los Angeles Rams","division":"NFC West"},"SF":{"name":"San Francisco 49ers","division":"NFC West"},"SEA":{"name":"Seattle Seahawks","division":"NFC West"}},"games":[{"week":1,"date":"2026-09-09","away":"NE","home":"SEA","homeProb":0.668,"awayScore":null,"homeScore":null},{"week":1,"date":"2026-09-10","away":"SF","home":"LA","homeProb":0.628,"awayScore":null,"homeScore":null},{"week":1,"date":"2026-09-13","away":"ARI","home":"LAC","homeProb":0.699,"awayScore":null,"homeScore":null},{"week":1,"date":"2026-09-13","away":"ATL","home":"PIT","homeProb":0.594,"awayScore":null,"homeScore":null},{"week":1,"date":"2026-09-13","away":"BAL","home":"IND","homeProb":0.425,"awayScore":null,"homeScore":null},{"week":1,"date":"2026-09-13","away":"BUF","home":"HOU","homeProb":0.605,"awayScore":null,"homeScore":null},{"week":1,"date":"2026-09-13","away":"CHI","home":"CAR","homeProb":0.395,"awayScore":null,"homeScore":null},{"week":1,"date":"2026-09-13","away":"CLE","home":"JAX","homeProb":0.759,"awayScore":null,"homeScore":null},{"week":1,"date":"2026-09-13","away":"DAL","home":"NYG","homeProb":0.498,"awayScore":null,"homeScore":null},{"week":1,"date":"2026-09-13","away":"GB","home":"MIN","homeProb":0.577,"awayScore":null,"homeScore":null},{"week":1,"date":"2026-09-13","away":"MIA","home":"LV","homeProb":0.39,"awayScore":null,"homeScore":null},{"week":1,"date":"2026-09-13","away":"NO","home":"DET","homeProb":0.686,"awayScore":null,"homeScore":null},{"week":1,"date":"2026-09-13","away":"NYJ","home":"TEN","homeProb":0.581,"awayScore":null,"homeScore":null},{"week":1,"date":"2026-09-13","away":"TB","home":"CIN","homeProb":0.565,"awayScore":null,"homeScore":null},{"week":1,"date":"2026-09-13","away":"WAS","home":"PHI","homeProb":0.679,"awayScore":null,"homeScore":null},{"week":1,"date":"2026-09-14","away":"DEN","home":"KC","homeProb":0.369,"awayScore":null,"homeScore":null},{"week":2,"date":"2026-09-17","away":"DET","home":"BUF","homeProb":0.616,"awayScore":null,"homeScore":null},{"week":2,"date":"2026-09-20","away":"CAR","home":"ATL","homeProb":0.591,"awayScore":null,"homeScore":null},{"week":2,"date":"2026-09-20","away":"CIN","home":"HOU","homeProb":0.718,"awayScore":null,"homeScore":null},{"week":2,"date":"2026-09-20","away":"CLE","home":"TB","homeProb":0.627,"awayScore":null,"homeScore":null},{"week":2,"date":"2026-09-20","away":"GB","home":"NYJ","homeProb":0.297,"awayScore":null,"homeScore":null},{"week":2,"date":"2026-09-20","away":"IND","home":"KC","homeProb":0.566,"awayScore":null,"homeScore":null},{"week":2,"date":"2026-09-20","away":"JAX","home":"DEN","homeProb":0.614,"awayScore":null,"homeScore":null},{"week":2,"date":"2026-09-20","away":"LV","home":"LAC","homeProb":0.74,"awayScore":null,"homeScore":null},{"week":2,"date":"2026-09-20","away":"MIA","home":"SF","homeProb":0.682,"awayScore":null,"homeScore":null},{"week":2,"date":"2026-09-20","away":"MIN","home":"CHI","homeProb":0.58,"awayScore":null,"homeScore":null},{"week":2,"date":"2026-09-20","away":"NO","home":"BAL","homeProb":0.72,"awayScore":null,"homeScore":null},{"week":2,"date":"2026-09-20","away":"PHI","home":"TEN","homeProb":0.3,"awayScore":null,"homeScore":null},{"week":2,"date":"2026-09-20","away":"PIT","home":"NE","homeProb":0.674,"awayScore":null,"homeScore":null},{"week":2,"date":"2026-09-20","away":"SEA","home":"ARI","homeProb":0.185,"awayScore":null,"homeScore":null},{"week":2,"date":"2026-09-20","away":"WAS","home":"DAL","homeProb":0.546,"awayScore":null,"homeScore":null},{"week":2,"date":"2026-09-21","away":"NYG","home":"LA","homeProb":0.772,"awayScore":null,"homeScore":null},{"week":3,"date":"2026-09-24","away":"ATL","home":"GB","homeProb":0.622,"awayScore":null,"homeScore":null},{"week":3,"date":"2026-09-27","away":"ARI","home":"SF","homeProb":0.758,"awayScore":null,"homeScore":null},{"week":3,"date":"2026-09-27","away":"BAL","home":"DAL","homeProb":0.433,"awayScore":null,"homeScore":null},{"week":3,"date":"2026-09-27","away":"CAR","home":"CLE","homeProb":0.51,"awayScore":null,"homeScore":null},{"week":3,"date":"2026-09-27","away":"CIN","home":"PIT","homeProb":0.565,"awayScore":null,"homeScore":null},{"week":3,"date":"2026-09-27","away":"HOU","home":"IND","homeProb":0.356,"awayScore":null,"homeScore":null},{"week":3,"date":"2026-09-27","away":"KC","home":"MIA","homeProb":0.539,"awayScore":null,"homeScore":null},{"week":3,"date":"2026-09-27","away":"LAC","home":"BUF","homeProb":0.684,"awayScore":null,"homeScore":null},{"week":3,"date":"2026-09-27","away":"LA","home":"DEN","homeProb":0.554,"awayScore":null,"homeScore":null},{"week":3,"date":"2026-09-27","away":"LV","home":"NO","homeProb":0.697,"awayScore":null,"homeScore":null},{"week":3,"date":"2026-09-27","away":"MIN","home":"TB","homeProb":0.452,"awayScore":null,"homeScore":null},{"week":3,"date":"2026-09-27","away":"NE","home":"JAX","homeProb":0.555,"awayScore":null,"homeScore":null},{"week":3,"date":"2026-09-27","away":"NYJ","home":"DET","homeProb":0.805,"awayScore":null,"homeScore":null},{"week":3,"date":"2026-09-27","away":"SEA","home":"WAS","homeProb":0.284,"awayScore":null,"homeScore":null},{"week":3,"date":"2026-09-27","away":"TEN","home":"NYG","homeProb":0.657,"awayScore":null,"homeScore":null},{"week":3,"date":"2026-09-28","away":"PHI","home":"CHI","homeProb":0.551,"awayScore":null,"homeScore":null},{"week":4,"date":"2026-10-01","away":"PIT","home":"CLE","homeProb":0.406,"awayScore":null,"homeScore":null},{"week":4,"date":"2026-10-04","away":"ARI","home":"NYG","homeProb":0.598,"awayScore":null,"homeScore":null},{"week":4,"date":"2026-10-04","away":"DAL","home":"HOU","homeProb":0.73,"awayScore":null,"homeScore":null},{"week":4,"date":"2026-10-04","away":"DEN","home":"SF","homeProb":0.521,"awayScore":null,"homeScore":null},{"week":4,"date":"2026-10-04","away":"DET","home":"CAR","homeProb":0.37,"awayScore":null,"homeScore":null},{"week":4,"date":"2026-10-04","away":"GB","home":"TB","homeProb":0.451,"awayScore":null,"homeScore":null},{"week":4,"date":"2026-10-04","away":"IND","home":"WAS","homeProb":0.538,"awayScore":null,"homeScore":null},{"week":4,"date":"2026-10-04","away":"JAX","home":"CIN","homeProb":0.416,"awayScore":null,"homeScore":null},{"week":4,"date":"2026-10-04","away":"KC","home":"LV","homeProb":0.374,"awayScore":null,"homeScore":null},{"week":4,"date":"2026-10-04","away":"LAC","home":"SEA","homeProb":0.756,"awayScore":null,"homeScore":null},{"week":4,"date":"2026-10-04","away":"LA","home":"PHI","homeProb":0.471,"awayScore":null,"homeScore":null},{"week":4,"date":"2026-10-04","away":"MIA","home":"MIN","homeProb":0.68,"awayScore":null,"homeScore":null},{"week":4,"date":"2026-10-04","away":"NE","home":"BUF","homeProb":0.582,"awayScore":null,"homeScore":null},{"week":4,"date":"2026-10-04","away":"NYJ","home":"CHI","homeProb":0.775,"awayScore":null,"homeScore":null},{"week":4,"date":"2026-10-04","away":"TEN","home":"BAL","homeProb":0.813,"awayScore":null,"homeScore":null},{"week":4,"date":"2026-10-05","away":"ATL","home":"NO","homeProb":0.485,"awayScore":null,"homeScore":null},{"week":5,"date":"2026-10-08","away":"TB","home":"DAL","homeProb":0.536,"awayScore":null,"homeScore":null},{"week":5,"date":"2026-10-11","away":"BAL","home":"ATL","homeProb":0.447,"awayScore":null,"homeScore":null},{"week":5,"date":"2026-10-11","away":"CHI","home":"GB","homeProb":0.536,"awayScore":null,"homeScore":null},{"week":5,"date":"2026-10-11","away":"CIN","home":"MIA","homeProb":0.499,"awayScore":null,"homeScore":null},{"week":5,"date":"2026-10-11","away":"CLE","home":"NYJ","homeProb":0.409,"awayScore":null,"homeScore":null},{"week":5,"date":"2026-10-11","away":"DEN","home":"LAC","homeProb":0.414,"awayScore":null,"homeScore":null},{"week":5,"date":"2026-10-11","away":"DET","home":"ARI","homeProb":0.286,"awayScore":null,"homeScore":null},{"week":5,"date":"2026-10-11","away":"HOU","home":"TEN","homeProb":0.261,"awayScore":null,"homeScore":null},{"week":5,"date":"2026-10-11","away":"IND","home":"PIT","homeProb":0.582,"awayScore":null,"homeScore":null},{"week":5,"date":"2026-10-11","away":"LV","home":"NE","homeProb":0.853,"awayScore":null,"homeScore":null},{"week":5,"date":"2026-10-11","away":"MIN","home":"NO","homeProb":0.416,"awayScore":null,"homeScore":null},{"week":5,"date":"2026-10-11","away":"NYG","home":"WAS","homeProb":0.572,"awayScore":null,"homeScore":null},{"week":5,"date":"2026-10-11","away":"PHI","home":"JAX","homeProb":0.611,"awayScore":null,"homeScore":null},{"week":5,"date":"2026-10-11","away":"SF","home":"SEA","homeProb":0.688,"awayScore":null,"homeScore":null},{"week":5,"date":"2026-10-12","away":"BUF","home":"LA","homeProb":0.596,"awayScore":null,"homeScore":null},{"week":6,"date":"2026-10-15","away":"SEA","home":"DEN","homeProb":0.477,"awayScore":null,"homeScore":null},{"week":6,"date":"2026-10-18","away":"ARI","home":"LA","homeProb":0.828,"awayScore":null,"homeScore":null},{"week":6,"date":"2026-10-18","away":"BAL","home":"CLE","homeProb":0.372,"awayScore":null,"homeScore":null},{"week":6,"date":"2026-10-18","away":"BUF","home":"LV","homeProb":0.27,"awayScore":null,"homeScore":null},{"week":6,"date":"2026-10-18","away":"CAR","home":"PHI","homeProb":0.702,"awayScore":null,"homeScore":null},{"week":6,"date":"2026-10-18","away":"CHI","home":"ATL","homeProb":0.464,"awayScore":null,"homeScore":null},{"week":6,"date":"2026-10-18","away":"DAL","home":"GB","homeProb":0.633,"awayScore":null,"homeScore":null},{"week":6,"date":"2026-10-18","away":"HOU","home":"JAX","homeProb":0.554,"awayScore":null,"homeScore":null},{"week":6,"date":"2026-10-18","away":"LAC","home":"KC","homeProb":0.511,"awayScore":null,"homeScore":null},{"week":6,"date":"2026-10-18","away":"NO","home":"NYG","homeProb":0.548,"awayScore":null,"homeScore":null},{"week":6,"date":"2026-10-18","away":"NYJ","home":"NE","homeProb":0.848,"awayScore":null,"homeScore":null},{"week":6,"date":"2026-10-18","away":"PIT","home":"TB","homeProb":0.483,"awayScore":null,"homeScore":null},{"week":6,"date":"2026-10-18","away":"TEN","home":"IND","homeProb":0.7,"awayScore":null,"homeScore":null},{"week":6,"date":"2026-10-19","away":"WAS","home":"SF","homeProb":0.694,"awayScore":null,"homeScore":null},{"week":7,"date":"2026-10-22","away":"NE","home":"CHI","homeProb":0.483,"awayScore":null,"homeScore":null},{"week":7,"date":"2026-10-25","away":"CIN","home":"BAL","homeProb":0.628,"awayScore":null,"homeScore":null},{"week":7,"date":"2026-10-25","away":"CLE","home":"TEN","homeProb":0.454,"awayScore":null,"homeScore":null},{"week":7,"date":"2026-10-25","away":"DEN","home":"ARI","homeProb":0.237,"awayScore":null,"homeScore":null},{"week":7,"date":"2026-10-25","away":"GB","home":"DET","homeProb":0.581,"awayScore":null,"homeScore":null},{"week":7,"date":"2026-10-25","away":"IND","home":"MIN","homeProb":0.676,"awayScore":null,"homeScore":null},{"week":7,"date":"2026-10-25","away":"KC","home":"SEA","homeProb":0.803,"awayScore":null,"homeScore":null},{"week":7,"date":"2026-10-25","away":"LA","home":"LV","homeProb":0.227,"awayScore":null,"homeScore":null},{"week":7,"date":"2026-10-25","away":"MIA","home":"NYJ","homeProb":0.349,"awayScore":null,"homeScore":null},{"week":7,"date":"2026-10-25","away":"NYG","home":"HOU","homeProb":0.766,"awayScore":null,"homeScore":null},{"week":7,"date":"2026-10-25","away":"PIT","home":"NO","homeProb":0.438,"awayScore":null,"homeScore":null},{"week":7,"date":"2026-10-25","away":"SF","home":"ATL","homeProb":0.421,"awayScore":null,"homeScore":null},{"week":7,"date":"2026-10-25","away":"TB","home":"CAR","homeProb":0.481,"awayScore":null,"homeScore":null},{"week":7,"date":"2026-10-26","away":"DAL","home":"PHI","homeProb":0.678,"awayScore":null,"homeScore":null},{"week":8,"date":"2026-10-29","away":"CAR","home":"GB","homeProb":0.673,"awayScore":null,"homeScore":null},{"week":8,"date":"2026-11-01","away":"ARI","home":"DAL","homeProb":0.616,"awayScore":null,"homeScore":null},{"week":8,"date":"2026-11-01","away":"ATL","home":"TB","homeProb":0.557,"awayScore":null,"homeScore":null},{"week":8,"date":"2026-11-01","away":"BAL","home":"BUF","homeProb":0.64,"awayScore":null,"homeScore":null},{"week":8,"date":"2026-11-01","away":"CLE","home":"PIT","homeProb":0.684,"awayScore":null,"homeScore":null},{"week":8,"date":"2026-11-01","away":"IND","home":"JAX","homeProb":0.702,"awayScore":null,"homeScore":null},{"week":8,"date":"2026-11-01","away":"KC","home":"DEN","homeProb":0.725,"awayScore":null,"homeScore":null},{"week":8,"date":"2026-11-01","away":"LAC","home":"LA","homeProb":0.699,"awayScore":null,"homeScore":null},{"week":8,"date":"2026-11-01","away":"LV","home":"NYJ","homeProb":0.554,"awayScore":null,"homeScore":null},{"week":8,"date":"2026-11-01","away":"MIN","home":"DET","homeProb":0.581,"awayScore":null,"homeScore":null},{"week":8,"date":"2026-11-01","away":"NE","home":"MIA","homeProb":0.355,"awayScore":null,"homeScore":null},{"week":8,"date":"2026-11-01","away":"PHI","home":"WAS","homeProb":0.403,"awayScore":null,"homeScore":null},{"week":8,"date":"2026-11-01","away":"TEN","home":"CIN","homeProb":0.718,"awayScore":null,"homeScore":null},{"week":8,"date":"2026-11-02","away":"CHI","home":"SEA","homeProb":0.713,"awayScore":null,"homeScore":null},{"week":9,"date":"2026-11-05","away":"JAX","home":"BAL","homeProb":0.523,"awayScore":null,"homeScore":null},{"week":9,"date":"2026-11-08","away":"ARI","home":"SEA","homeProb":0.854,"awayScore":null,"homeScore":null},{"week":9,"date":"2026-11-08","away":"CIN","home":"ATL","homeProb":0.54,"awayScore":null,"homeScore":null},{"week":9,"date":"2026-11-08","away":"CLE","home":"NO","homeProb":0.63,"awayScore":null,"homeScore":null},{"week":9,"date":"2026-11-08","away":"DAL","home":"IND","homeProb":0.539,"awayScore":null,"homeScore":null},{"week":9,"date":"2026-11-08","away":"DEN","home":"CAR","homeProb":0.324,"awayScore":null,"homeScore":null},{"week":9,"date":"2026-11-08","away":"DET","home":"MIA","homeProb":0.407,"awayScore":null,"homeScore":null},{"week":9,"date":"2026-11-08","away":"GB","home":"NE","homeProb":0.652,"awayScore":null,"homeScore":null},{"week":9,"date":"2026-11-08","away":"HOU","home":"LAC","homeProb":0.411,"awayScore":null,"homeScore":null},{"week":9,"date":"2026-11-08","away":"LA","home":"WAS","homeProb":0.314,"awayScore":null,"homeScore":null},{"week":9,"date":"2026-11-08","away":"LV","home":"SF","homeProb":0.837,"awayScore":null,"homeScore":null},{"week":9,"date":"2026-11-08","away":"NYG","home":"PHI","homeProb":0.719,"awayScore":null,"homeScore":null},{"week":9,"date":"2026-11-08","away":"NYJ","home":"KC","homeProb":0.697,"awayScore":null,"homeScore":null},{"week":9,"date":"2026-11-08","away":"TB","home":"CHI","homeProb":0.632,"awayScore":null,"homeScore":null},{"week":9,"date":"2026-11-09","away":"BUF","home":"MIN","homeProb":0.5,"awayScore":null,"homeScore":null},{"week":10,"date":"2026-11-12","away":"WAS","home":"NYG","homeProb":0.502,"awayScore":null,"homeScore":null},{"week":10,"date":"2026-11-15","away":"BUF","home":"NYJ","homeProb":0.218,"awayScore":null,"homeScore":null},{"week":10,"date":"2026-11-15","away":"CAR","home":"NO","homeProb":0.55,"awayScore":null,"homeScore":null},{"week":10,"date":"2026-11-15","away":"HOU","home":"CLE","homeProb":0.321,"awayScore":null,"homeScore":null},{"week":10,"date":"2026-11-15","away":"JAX","home":"TEN","homeProb":0.248,"awayScore":null,"homeScore":null},{"week":10,"date":"2026-11-15","away":"KC","home":"ATL","homeProb":0.573,"awayScore":null,"homeScore":null},{"week":10,"date":"2026-11-15","away":"LA","home":"ARI","homeProb":0.217,"awayScore":null,"homeScore":null},{"week":10,"date":"2026-11-15","away":"MIA","home":"IND","homeProb":0.53,"awayScore":null,"homeScore":null},{"week":10,"date":"2026-11-15","away":"MIN","home":"GB","homeProb":0.543,"awayScore":null,"homeScore":null},{"week":10,"date":"2026-11-15","away":"NE","home":"DET","homeProb":0.498,"awayScore":null,"homeScore":null},{"week":10,"date":"2026-11-15","away":"PIT","home":"CIN","homeProb":0.487,"awayScore":null,"homeScore":null},{"week":10,"date":"2026-11-15","away":"SEA","home":"LV","homeProb":0.227,"awayScore":null,"homeScore":null},{"week":10,"date":"2026-11-15","away":"SF","home":"DAL","homeProb":0.416,"awayScore":null,"homeScore":null},{"week":10,"date":"2026-11-16","away":"LAC","home":"BAL","homeProb":0.638,"awayScore":null,"homeScore":null},{"week":11,"date":"2026-11-19","away":"IND","home":"HOU","homeProb":0.734,"awayScore":null,"homeScore":null},{"week":11,"date":"2026-11-22","away":"ARI","home":"KC","homeProb":0.643,"awayScore":null,"homeScore":null},{"week":11,"date":"2026-11-22","away":"BAL","home":"CAR","homeProb":0.399,"awayScore":null,"homeScore":null},{"week":11,"date":"2026-11-22","away":"JAX","home":"NYG","homeProb":0.356,"awayScore":null,"homeScore":null},{"week":11,"date":"2026-11-22","away":"LV","home":"DEN","homeProb":0.861,"awayScore":null,"homeScore":null},{"week":11,"date":"2026-11-22","away":"MIA","home":"BUF","homeProb":0.729,"awayScore":null,"homeScore":null},{"week":11,"date":"2026-11-22","away":"MIN","home":"SF","homeProb":0.621,"awayScore":null,"homeScore":null},{"week":11,"date":"2026-11-22","away":"NO","home":"CHI","homeProb":0.703,"awayScore":null,"homeScore":null},{"week":11,"date":"2026-11-22","away":"NYJ","home":"LAC","homeProb":0.735,"awayScore":null,"homeScore":null},{"week":11,"date":"2026-11-22","away":"PIT","home":"PHI","homeProb":0.623,"awayScore":null,"homeScore":null},{"week":11,"date":"2026-11-22","away":"TB","home":"DET","homeProb":0.647,"awayScore":null,"homeScore":null},{"week":11,"date":"2026-11-22","away":"TEN","home":"DAL","homeProb":0.705,"awayScore":null,"homeScore":null},{"week":11,"date":"2026-11-23","away":"CIN","home":"WAS","homeProb":0.496,"awayScore":null,"homeScore":null},{"week":12,"date":"2026-11-25","away":"GB","home":"LA","homeProb":0.657,"awayScore":null,"homeScore":null},{"week":12,"date":"2026-11-26","away":"CHI","home":"DET","homeProb":0.556,"awayScore":null,"homeScore":null},{"week":12,"date":"2026-11-26","away":"KC","home":"BUF","homeProb":0.725,"awayScore":null,"homeScore":null},{"week":12,"date":"2026-11-26","away":"PHI","home":"DAL","homeProb":0.416,"awayScore":null,"homeScore":null},{"week":12,"date":"2026-11-27","away":"DEN","home":"PIT","homeProb":0.419,"awayScore":null,"homeScore":null},{"week":12,"date":"2026-11-29","away":"ATL","home":"MIN","homeProb":0.653,"awayScore":null,"homeScore":null},{"week":12,"date":"2026-11-29","away":"BAL","home":"HOU","homeProb":0.663,"awayScore":null,"homeScore":null},{"week":12,"date":"2026-11-29","away":"LV","home":"CLE","homeProb":0.662,"awayScore":null,"homeScore":null},{"week":12,"date":"2026-11-29","away":"NE","home":"LAC","homeProb":0.421,"awayScore":null,"homeScore":null},{"week":12,"date":"2026-11-29","away":"NO","home":"CIN","homeProb":0.605,"awayScore":null,"homeScore":null},{"week":12,"date":"2026-11-29","away":"NYG","home":"IND","homeProb":0.557,"awayScore":null,"homeScore":null},{"week":12,"date":"2026-11-29","away":"NYJ","home":"MIA","homeProb":0.706,"awayScore":null,"homeScore":null},{"week":12,"date":"2026-11-29","away":"SEA","home":"SF","homeProb":0.376,"awayScore":null,"homeScore":null},{"week":12,"date":"2026-11-29","away":"TEN","home":"JAX","homeProb":0.839,"awayScore":null,"homeScore":null},{"week":12,"date":"2026-11-29","away":"WAS","home":"ARI","homeProb":0.391,"awayScore":null,"homeScore":null},{"week":12,"date":"2026-11-30","away":"CAR","home":"TB","homeProb":0.582,"awayScore":null,"homeScore":null},{"week":13,"date":"2026-12-03","away":"KC","home":"LA","homeProb":0.746,"awayScore":null,"homeScore":null},{"week":13,"date":"2026-12-06","away":"BUF","home":"NE","homeProb":0.6,"awayScore":null,"homeScore":null},{"week":13,"date":"2026-12-06","away":"CAR","home":"MIN","homeProb":0.706,"awayScore":null,"homeScore":null},{"week":13,"date":"2026-12-06","away":"CIN","home":"CLE","homeProb":0.442,"awayScore":null,"homeScore":null},{"week":13,"date":"2026-12-06","away":"DET","home":"ATL","homeProb":0.422,"awayScore":null,"homeScore":null},{"week":13,"date":"2026-12-06","away":"GB","home":"NO","homeProb":0.423,"awayScore":null,"homeScore":null},{"week":13,"date":"2026-12-06","away":"HOU","home":"PIT","homeProb":0.421,"awayScore":null,"homeScore":null},{"week":13,"date":"2026-12-06","away":"JAX","home":"CHI","homeProb":0.493,"awayScore":null,"homeScore":null},{"week":13,"date":"2026-12-06","away":"LAC","home":"TB","homeProb":0.509,"awayScore":null,"homeScore":null},{"week":13,"date":"2026-12-06","away":"MIA","home":"DEN","homeProb":0.743,"awayScore":null,"homeScore":null},{"week":13,"date":"2026-12-06","away":"PHI","home":"ARI","homeProb":0.278,"awayScore":null,"homeScore":null},{"week":13,"date":"2026-12-06","away":"SF","home":"NYG","homeProb":0.384,"awayScore":null,"homeScore":null},{"week":13,"date":"2026-12-06","away":"WAS","home":"TEN","homeProb":0.411,"awayScore":null,"homeScore":null},{"week":13,"date":"2026-12-07","away":"DAL","home":"SEA","homeProb":0.788,"awayScore":null,"homeScore":null},{"week":14,"date":"2026-12-10","away":"MIN","home":"NE","homeProb":0.673,"awayScore":null,"homeScore":null},{"week":14,"date":"2026-12-13","away":"ATL","home":"CLE","homeProb":0.462,"awayScore":null,"homeScore":null},{"week":14,"date":"2026-12-13","away":"BUF","home":"GB","homeProb":0.452,"awayScore":null,"homeScore":null},{"week":14,"date":"2026-12-13","away":"CHI","home":"MIA","homeProb":0.429,"awayScore":null,"homeScore":null},{"week":14,"date":"2026-12-13","away":"DEN","home":"NYJ","homeProb":0.215,"awayScore":null,"homeScore":null},{"week":14,"date":"2026-12-13","away":"HOU","home":"WAS","homeProb":0.353,"awayScore":null,"homeScore":null},{"week":14,"date":"2026-12-13","away":"IND","home":"PHI","homeProb":0.679,"awayScore":null,"homeScore":null},{"week":14,"date":"2026-12-13","away":"KC","home":"CIN","homeProb":0.584,"awayScore":null,"homeScore":null},{"week":14,"date":"2026-12-13","away":"LAC","home":"LV","homeProb":0.325,"awayScore":null,"homeScore":null},{"week":14,"date":"2026-12-13","away":"LA","home":"SF","homeProb":0.457,"awayScore":null,"homeScore":null},{"week":14,"date":"2026-12-13","away":"NO","home":"CAR","homeProb":0.538,"awayScore":null,"homeScore":null},{"week":14,"date":"2026-12-13","away":"NYG","home":"SEA","homeProb":0.811,"awayScore":null,"homeScore":null},{"week":14,"date":"2026-12-13","away":"TB","home":"BAL","homeProb":0.661,"awayScore":null,"homeScore":null},{"week":14,"date":"2026-12-13","away":"TEN","home":"DET","homeProb":0.797,"awayScore":null,"homeScore":null},{"week":14,"date":"2026-12-14","away":"PIT","home":"JAX","homeProb":0.628,"awayScore":null,"homeScore":null},{"week":15,"date":"2026-12-17","away":"SF","home":"LAC","homeProb":0.488,"awayScore":null,"homeScore":null},{"week":15,"date":"2026-12-19","away":"CHI","home":"BUF","homeProb":0.652,"awayScore":null,"homeScore":null},{"week":15,"date":"2026-12-19","away":"SEA","home":"PHI","homeProb":0.402,"awayScore":null,"homeScore":null},{"week":15,"date":"2026-12-20","away":"ATL","home":"WAS","homeProb":0.529,"awayScore":null,"homeScore":null},{"week":15,"date":"2026-12-20","away":"BAL","home":"PIT","homeProb":0.494,"awayScore":null,"homeScore":null},{"week":15,"date":"2026-12-20","away":"CIN","home":"CAR","homeProb":0.463,"awayScore":null,"homeScore":null},{"week":15,"date":"2026-12-20","away":"CLE","home":"NYG","homeProb":0.612,"awayScore":null,"homeScore":null},{"week":15,"date":"2026-12-20","away":"DAL","home":"LA","homeProb":0.742,"awayScore":null,"homeScore":null},{"week":15,"date":"2026-12-20","away":"DEN","home":"LV","homeProb":0.258,"awayScore":null,"homeScore":null},{"week":15,"date":"2026-12-20","away":"DET","home":"MIN","homeProb":0.539,"awayScore":null,"homeScore":null},{"week":15,"date":"2026-12-20","away":"IND","home":"TEN","homeProb":0.388,"awayScore":null,"homeScore":null},{"week":15,"date":"2026-12-20","away":"JAX","home":"HOU","homeProb":0.601,"awayScore":null,"homeScore":null},{"week":15,"date":"2026-12-20","away":"MIA","home":"GB","homeProb":0.63,"awayScore":null,"homeScore":null},{"week":15,"date":"2026-12-20","away":"NO","home":"TB","homeProb":0.587,"awayScore":null,"homeScore":null},{"week":15,"date":"2026-12-20","away":"NYJ","home":"ARI","homeProb":0.592,"awayScore":null,"homeScore":null},{"week":15,"date":"2026-12-21","away":"NE","home":"KC","homeProb":0.379,"awayScore":null,"homeScore":null},{"week":16,"date":"2026-12-24","away":"HOU","home":"PHI","homeProb":0.507,"awayScore":null,"homeScore":null},{"week":16,"date":"2026-12-25","away":"BUF","home":"DEN","homeProb":0.571,"awayScore":null,"homeScore":null},{"week":16,"date":"2026-12-25","away":"GB","home":"CHI","homeProb":0.566,"awayScore":null,"homeScore":null},{"week":16,"date":"2026-12-25","away":"LA","home":"SEA","homeProb":0.639,"awayScore":null,"homeScore":null},{"week":16,"date":"2026-12-27","away":"ARI","home":"NO","homeProb":0.603,"awayScore":null,"homeScore":null},{"week":16,"date":"2026-12-27","away":"CAR","home":"PIT","homeProb":0.626,"awayScore":null,"homeScore":null},{"week":16,"date":"2026-12-27","away":"CIN","home":"IND","homeProb":0.507,"awayScore":null,"homeScore":null},{"week":16,"date":"2026-12-27","away":"CLE","home":"BAL","homeProb":0.732,"awayScore":null,"homeScore":null},{"week":16,"date":"2026-12-27","away":"JAX","home":"DAL","homeProb":0.376,"awayScore":null,"homeScore":null},{"week":16,"date":"2026-12-27","away":"LAC","home":"MIA","homeProb":0.475,"awayScore":null,"homeScore":null},{"week":16,"date":"2026-12-27","away":"NE","home":"NYJ","homeProb":0.23,"awayScore":null,"homeScore":null},{"week":16,"date":"2026-12-27","away":"SF","home":"KC","homeProb":0.42,"awayScore":null,"homeScore":null},{"week":16,"date":"2026-12-27","away":"TB","home":"ATL","homeProb":0.565,"awayScore":null,"homeScore":null},{"week":16,"date":"2026-12-27","away":"TEN","home":"LV","homeProb":0.539,"awayScore":null,"homeScore":null},{"week":16,"date":"2026-12-27","away":"WAS","home":"MIN","homeProb":0.682,"awayScore":null,"homeScore":null},{"week":16,"date":"2026-12-28","away":"NYG","home":"DET","homeProb":0.705,"awayScore":null,"homeScore":null},{"week":17,"date":"2026-12-31","away":"BAL","home":"CIN","homeProb":0.468,"awayScore":null,"homeScore":null},{"week":17,"date":"2027-01-03","away":"BUF","home":"MIA","homeProb":0.349,"awayScore":null,"homeScore":null},{"week":17,"date":"2027-01-03","away":"DEN","home":"NE","homeProb":0.603,"awayScore":null,"homeScore":null},{"week":17,"date":"2027-01-03","away":"DET","home":"CHI","homeProb":0.505,"awayScore":null,"homeScore":null},{"week":17,"date":"2027-01-03","away":"IND","home":"CLE","homeProb":0.463,"awayScore":null,"homeScore":null},{"week":17,"date":"2027-01-03","away":"KC","home":"LAC","homeProb":0.611,"awayScore":null,"homeScore":null},{"week":17,"date":"2027-01-03","away":"LA","home":"TB","homeProb":0.333,"awayScore":null,"homeScore":null},{"week":17,"date":"2027-01-03","away":"LV","home":"ARI","homeProb":0.62,"awayScore":null,"homeScore":null},{"week":17,"date":"2027-01-03","away":"MIN","home":"NYJ","homeProb":0.288,"awayScore":null,"homeScore":null},{"week":17,"date":"2027-01-03","away":"NO","home":"ATL","homeProb":0.605,"awayScore":null,"homeScore":null},{"week":17,"date":"2027-01-03","away":"NYG","home":"DAL","homeProb":0.577,"awayScore":null,"homeScore":null},{"week":17,"date":"2027-01-03","away":"PHI","home":"SF","homeProb":0.589,"awayScore":null,"homeScore":null},{"week":17,"date":"2027-01-03","away":"PIT","home":"TEN","homeProb":0.35,"awayScore":null,"homeScore":null},{"week":17,"date":"2027-01-03","away":"SEA","home":"CAR","homeProb":0.272,"awayScore":null,"homeScore":null},{"week":17,"date":"2027-01-03","away":"WAS","home":"JAX","homeProb":0.706,"awayScore":null,"homeScore":null},{"week":17,"date":"2027-01-04","away":"HOU","home":"GB","homeProb":0.433,"awayScore":null,"homeScore":null},{"week":18,"date":"2027-01-10","away":"ATL","home":"CAR","homeProb":0.488,"awayScore":null,"homeScore":null},{"week":18,"date":"2027-01-10","away":"CHI","home":"MIN","homeProb":0.576,"awayScore":null,"homeScore":null},{"week":18,"date":"2027-01-10","away":"CLE","home":"CIN","homeProb":0.653,"awayScore":null,"homeScore":null},{"week":18,"date":"2027-01-10","away":"DAL","home":"WAS","homeProb":0.525,"awayScore":null,"homeScore":null},{"week":18,"date":"2027-01-10","away":"DET","home":"GB","homeProb":0.499,"awayScore":null,"homeScore":null},{"week":18,"date":"2027-01-10","away":"JAX","home":"IND","homeProb":0.374,"awayScore":null,"homeScore":null},{"week":18,"date":"2027-01-10","away":"LAC","home":"DEN","homeProb":0.697,"awayScore":null,"homeScore":null},{"week":18,"date":"2027-01-10","away":"LV","home":"KC","homeProb":0.707,"awayScore":null,"homeScore":null},{"week":18,"date":"2027-01-10","away":"MIA","home":"NE","homeProb":0.743,"awayScore":null,"homeScore":null},{"week":18,"date":"2027-01-10","away":"NYJ","home":"BUF","homeProb":0.853,"awayScore":null,"homeScore":null},{"week":18,"date":"2027-01-10","away":"PHI","home":"NYG","homeProb":0.41,"awayScore":null,"homeScore":null},{"week":18,"date":"2027-01-10","away":"PIT","home":"BAL","homeProb":0.6,"awayScore":null,"homeScore":null},{"week":18,"date":"2027-01-10","away":"SEA","home":"LA","homeProb":0.49,"awayScore":null,"homeScore":null},{"week":18,"date":"2027-01-10","away":"SF","home":"ARI","homeProb":0.286,"awayScore":null,"homeScore":null},{"week":18,"date":"2027-01-10","away":"TB","home":"NO","homeProb":0.491,"awayScore":null,"homeScore":null},{"week":18,"date":"2027-01-10","away":"TEN","home":"HOU","homeProb":0.851,"awayScore":null,"homeScore":null}]};
+  const teams = DATA.teams;
+  const games = DATA.games;
+  let selected = null;   // team abbr or null = all games
+  let curWeek = null;
+
+  document.getElementById("seasonLabel").textContent = DATA.season;
+  document.getElementById("genLabel").textContent = "updated " + DATA.generated;
+
+  const nextWeek = (() => {
+    const up = games.filter(g => g.homeScore === null);
+    return up.length ? Math.min(...up.map(g => g.week)) : Math.max(...games.map(g => g.week));
+  })();
+  curWeek = nextWeek;
+
+  function fmtDate(iso) {
+    const d = new Date(iso + "T12:00:00");
+    return d.toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" });
+  }
+  function probFor(team, g) { return g.home === team ? g.homeProb : 1 - g.homeProb; }
+  function pick(g) { return g.homeProb >= 0.5 ? g.home : g.away; }
+  function conf(g) { return Math.max(g.homeProb, 1 - g.homeProb); }
+  function played(g) { return g.homeScore !== null; }
+  function winner(g) { return g.homeScore > g.awayScore ? g.home : g.away; }
+
+  function meter(p, isDog) {
+    return '<div class="meter" role="img" aria-label="' + Math.round(p * 100) +
+      '% win probability"><div class="fill' + (isDog ? " dog" : "") +
+      '" style="width:' + (p * 100).toFixed(0) + '%"></div><div class="mid"></div></div>';
+  }
+
+  function gameRow(g, perspective) {
+    const team = perspective || pick(g);
+    const p = probFor(team, g);
+    const isDog = p < 0.5;
+    const opp = g.home === team ? g.away : g.home;
+    const at = g.home === team ? "vs" : "@";
+    const starred = conf(g) >= 0.65;
+    let who, pctLabel;
+    if (perspective) {
+      who = '<span class="code">' + at + " " + teams[opp].name + "</span>" +
+        '<div class="sub">' + (p >= 0.5 ? "favored" : "underdog") + "</div>";
+      pctLabel = Math.round(p * 100) + "%";
+    } else {
+      const pk = pick(g);
+      who = '<span class="code' + (g.away === pk ? " fav" : "") + '">' + g.away +
+        "</span> @ <span class=\"code" + (g.home === pk ? " fav" : "") + '">' + g.home +
+        '</span><div class="sub">pick: ' + teams[pk].name + "</div>";
+      pctLabel = Math.round(conf(g) * 100) + "%";
+    }
+    let result = "";
+    if (played(g)) {
+      const hit = winner(g) === pick(g);
+      result = ' <span class="badge ' + (hit ? "hit" : "miss") + '">' +
+        g.awayScore + "–" + g.homeScore + " " + (hit ? "HIT" : "MISS") + "</span>";
+    }
+    return '<div class="game"><div class="when">Wk ' + g.week + "<br>" + fmtDate(g.date) +
+      '</div><div class="who">' + who + result + "</div>" +
+      meter(perspective ? p : conf(g), perspective ? isDog : false) +
+      '<div class="pct">' + (starred ? '<span class="star">★</span> ' : "") + pctLabel + "</div></div>";
+  }
+
+  function renderTeam(team) {
+    const sched = games.filter(g => g.home === team || g.away === team);
+    const next = sched.find(g => !played(g));
+    let html = "";
+    if (next) {
+      const p = probFor(team, next);
+      const opp = next.home === team ? next.away : next.home;
+      const at = next.home === team ? "vs" : "at";
+      html += '<div class="hero"><div class="eyebrow display">Next up &mdash; Week ' +
+        next.week + ", " + fmtDate(next.date) + "</div>" +
+        '<div class="matchup display">' + teams[team].name + " " + at + " " + teams[opp].name + "</div>" +
+        '<div class="sub">' + teams[team].division + " " + (next.home === team ? "home game" : "road game") + "</div>" +
+        '<div class="bignum">' + Math.round(p * 100) + "% <small>chance the " +
+        teams[team].name.split(" ").pop() + " win" + (conf(next) >= 0.65 ? " — ★ high confidence" : "") +
+        "</small></div></div>";
+    }
+    const done = sched.filter(played);
+    let record = "";
+    if (done.length) {
+      const hits = done.filter(g => winner(g) === pick(g)).length;
+      record = " &mdash; model " + hits + "–" + (done.length - hits) + " so far";
+    }
+    html += '<h2 class="section">Full ' + DATA.season + " schedule" + record + "</h2>";
+    html += '<div class="games">' + sched.map(g => gameRow(g, team)).join("") + "</div>";
+    html += '<div class="legend"><span><span class="dot" style="background:var(--field)"></span>' + team +
+      ' win probability</span><span><span class="dot" style="background:var(--dog)"></span>underdog</span>' +
+      "<span>marker at 50%</span></div>";
+    return html;
+  }
+
+  function renderWeek(week) {
+    const wk = games.filter(g => g.week === week);
+    const weeks = [...new Set(games.map(g => g.week))].sort((a, b) => a - b);
+    const i = weeks.indexOf(week);
+    let html = '<div class="weeknav">' +
+      '<button id="prevWk"' + (i === 0 ? " disabled" : "") + '>&larr; Wk ' + (i > 0 ? weeks[i - 1] : "") + "</button>" +
+      '<span class="wk display">Week ' + week + "</span>" +
+      '<button id="nextWk"' + (i === weeks.length - 1 ? " disabled" : "") + '>Wk ' + (i < weeks.length - 1 ? weeks[i + 1] : "") + " &rarr;</button></div>";
+    html += '<div class="games">' + wk.map(g => gameRow(g, null)).join("") + "</div>";
+    html += '<div class="legend"><span><span class="dot" style="background:var(--field)"></span>pick&rsquo;s win probability</span>' +
+      '<span class="display">green code = predicted winner</span></div>';
+    return html;
+  }
+
+  function render() {
+    const main = document.getElementById("main");
+    main.innerHTML = selected ? renderTeam(selected) : renderWeek(curWeek);
+    if (!selected) {
+      const prev = document.getElementById("prevWk"), next = document.getElementById("nextWk");
+      if (prev) prev.onclick = () => { curWeek -= 1; render(); };
+      if (next) next.onclick = () => { curWeek += 1; render(); };
+    }
+    document.querySelectorAll(".chip[data-team]").forEach(b =>
+      b.setAttribute("aria-pressed", String(b.dataset.team === selected)));
+    document.getElementById("allBtn").setAttribute("aria-pressed", String(selected === null));
+  }
+
+  const byConf = { AFC: [], NFC: [] };
+  Object.entries(teams).forEach(([abbr, t]) => byConf[t.division.split(" ")[0]].push(abbr));
+  for (const confName of ["AFC", "NFC"]) {
+    const el = document.getElementById(confName.toLowerCase() + "Chips");
+    byConf[confName]
+      .sort((a, b) => teams[a].division.localeCompare(teams[b].division) || a.localeCompare(b))
+      .forEach(abbr => {
+        const b = document.createElement("button");
+        b.className = "chip";
+        b.dataset.team = abbr;
+        b.textContent = abbr;
+        b.title = teams[abbr].name + " · " + teams[abbr].division;
+        b.setAttribute("aria-pressed", "false");
+        b.onclick = () => { selected = selected === abbr ? null : abbr; render(); };
+        el.appendChild(b);
+      });
+  }
+  document.getElementById("allBtn").onclick = () => { selected = null; render(); };
+  render();
+</script>

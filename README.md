@@ -18,7 +18,16 @@ python3.12 -m venv .venv          # needs Homebrew python3.12+ (system 3.9 is to
 .venv/bin/python train.py         # walk-forward backtest + save model.json
 .venv/bin/python predict.py       # picks for the next unplayed week
 .venv/bin/python predict.py --season 2026 --week 5
+.venv/bin/python position_impact.py  # which position's injuries move win prob
+.venv/bin/python export_web.py    # rebuild web/index.html for the web app
 ```
+
+## Web app
+
+`export_web.py` bakes the season's predictions into `web/index.html` (from
+`web/template.html`) — a self-contained page with a team filter: pick a team,
+see the win probability for every game on their schedule, next game featured.
+Published as a Claude artifact; republish the same file to update in place.
 
 Re-run all three each week during the season so ratings and rolling form
 include the latest results. `predict.py` on a completed week shows HIT/MISS
@@ -34,6 +43,13 @@ and the week record.
   QB-change flag — did the starter change from the team's previous game
   (announced pregame, so leak-free; for future games it fires when the
   incumbent QB is Out/Doubtful on the injury report).
+- **Position-weighted outs** (2013+, snap counts): every Out/Doubtful player is
+  weighted by his rolling snap share and summed per position group (QB, RB,
+  WR, TE, OL, DL, LB, DB) — a full-time starter out ≈ 1.0, a rotational
+  backup ≈ his share. `position_impact.py` runs the counterfactual: WR outs
+  cost the most (~4% win probability for a full-time WR), then RB; QB shows
+  small here only because the QB-change flag already captures it; individual
+  defensive absences barely register on single-game outcomes.
 - **Weather**: recorded temp/wind for training; free Open-Meteo forecasts at
   predict time for outdoor games within 16 days of kickoff (no API key).
 - **Context**: rest days, divisional game, dome, week number.

@@ -1,0 +1,370 @@
+<title>Gridiron Odds</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  :root {
+    --bg: #F5F4EF;
+    --surface: #FFFFFF;
+    --ink: #1C2734;
+    --muted: #5C6675;
+    --line: #E4E2D9;
+    --field: #2E7D46;
+    --field-soft: #E4F0E7;
+    --star: #A87B1F;
+    --star-soft: #F4EBD7;
+    --track: #ECEAE1;
+    --dog: #9AA3AD;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #12181F;
+      --surface: #1B232D;
+      --ink: #E8EBEE;
+      --muted: #94A1AD;
+      --line: #2A3541;
+      --field: #4CAB6E;
+      --field-soft: #20342A;
+      --star: #E0B24A;
+      --star-soft: #33301F;
+      --track: #26303B;
+      --dog: #55616D;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #12181F;
+    --surface: #1B232D;
+    --ink: #E8EBEE;
+    --muted: #94A1AD;
+    --line: #2A3541;
+    --field: #4CAB6E;
+    --field-soft: #20342A;
+    --star: #E0B24A;
+    --star-soft: #33301F;
+    --track: #26303B;
+    --dog: #55616D;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--ink);
+    font: 16px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+  .display {
+    font-family: "Avenir Next Condensed", "Helvetica Neue Condensed",
+      "Arial Narrow", system-ui, sans-serif;
+    letter-spacing: 0.01em;
+  }
+  .wrap { max-width: 860px; margin: 0 auto; padding: 0 20px 64px; }
+
+  header { padding: 28px 0 18px; border-bottom: 3px solid var(--ink); }
+  .masthead { display: flex; align-items: baseline; gap: 14px; flex-wrap: wrap; }
+  h1 {
+    margin: 0;
+    font-family: "Avenir Next Condensed", "Helvetica Neue Condensed",
+      "Arial Narrow", system-ui, sans-serif;
+    font-size: 2.6rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.02em;
+    text-wrap: balance;
+  }
+  h1 .season { color: var(--field); }
+  .tagline { color: var(--muted); font-size: 0.9rem; }
+
+  .picker { margin: 22px 0 6px; }
+  .picker-label {
+    font-size: 0.72rem; font-weight: 600; text-transform: uppercase;
+    letter-spacing: 0.09em; color: var(--muted); margin-bottom: 8px;
+  }
+  .conf-row { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; align-items: center; }
+  .conf-tag {
+    font-size: 0.72rem; font-weight: 700; letter-spacing: 0.06em;
+    color: var(--muted); width: 34px; flex: none;
+  }
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; }
+  .chip {
+    border: 1px solid var(--line);
+    background: var(--surface);
+    color: var(--ink);
+    border-radius: 6px;
+    padding: 5px 9px;
+    font-family: "Avenir Next Condensed", "Arial Narrow", system-ui, sans-serif;
+    font-size: 0.88rem;
+    font-weight: 600;
+    cursor: pointer;
+  }
+  .chip:hover { border-color: var(--field); }
+  .chip:focus-visible { outline: 2px solid var(--field); outline-offset: 1px; }
+  .chip[aria-pressed="true"] {
+    background: var(--field); border-color: var(--field); color: #fff;
+  }
+  .chip.all { font-family: system-ui, sans-serif; font-size: 0.8rem; }
+
+  .hero {
+    margin: 24px 0 8px;
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-left: 4px solid var(--field);
+    border-radius: 10px;
+    padding: 18px 20px 20px;
+  }
+  .hero .eyebrow {
+    font-size: 0.72rem; font-weight: 600; text-transform: uppercase;
+    letter-spacing: 0.09em; color: var(--field); margin-bottom: 4px;
+  }
+  .hero .matchup { font-size: 1.7rem; font-weight: 700; }
+  .hero .sub { color: var(--muted); font-size: 0.9rem; margin-top: 2px; }
+  .hero .bignum {
+    font-size: 2.6rem; font-weight: 700; font-variant-numeric: tabular-nums;
+    line-height: 1.1; margin-top: 10px;
+  }
+  .hero .bignum small { font-size: 1rem; font-weight: 500; color: var(--muted); }
+
+  .weeknav { display: flex; align-items: center; gap: 10px; margin: 26px 0 4px; }
+  .weeknav button {
+    border: 1px solid var(--line); background: var(--surface); color: var(--ink);
+    border-radius: 6px; padding: 4px 12px; font-size: 0.9rem; cursor: pointer;
+  }
+  .weeknav button:disabled { opacity: 0.35; cursor: default; }
+  .weeknav button:focus-visible { outline: 2px solid var(--field); }
+  .weeknav .wk { font-weight: 700; font-size: 1.05rem; min-width: 84px; text-align: center; }
+
+  h2.section {
+    font-size: 0.78rem; font-weight: 600; text-transform: uppercase;
+    letter-spacing: 0.09em; color: var(--muted);
+    margin: 26px 0 10px; padding-bottom: 6px; border-bottom: 1px solid var(--line);
+  }
+  .games { display: flex; flex-direction: column; gap: 8px; }
+  .game {
+    display: grid;
+    grid-template-columns: 52px 1fr 150px 64px;
+    gap: 12px;
+    align-items: center;
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    padding: 10px 14px;
+  }
+  .game .when { color: var(--muted); font-size: 0.78rem; line-height: 1.3; }
+  .game .who { font-size: 1rem; }
+  .game .who .code { font-weight: 700; }
+  .game .who .fav { color: var(--field); }
+  .game .who .sub { color: var(--muted); font-size: 0.8rem; }
+  .meter { height: 8px; background: var(--track); border-radius: 4px; position: relative; }
+  .meter .fill {
+    position: absolute; inset: 0 auto 0 0; border-radius: 4px;
+    background: var(--field); min-width: 4px;
+  }
+  .meter .fill.dog { background: var(--dog); }
+  .meter .mid {
+    position: absolute; left: 50%; top: -2px; bottom: -2px;
+    width: 1px; background: var(--muted); opacity: 0.5;
+  }
+  .game .pct {
+    font-variant-numeric: tabular-nums; font-weight: 700; text-align: right;
+    font-size: 0.98rem;
+  }
+  .game .pct .star { color: var(--star); }
+  .badge {
+    display: inline-block; border-radius: 5px; padding: 1px 7px;
+    font-size: 0.72rem; font-weight: 700; letter-spacing: 0.04em;
+  }
+  .badge.hit { background: var(--field-soft); color: var(--field); }
+  .badge.miss { background: var(--track); color: var(--muted); }
+  .badge.starred { background: var(--star-soft); color: var(--star); }
+
+  .legend { display: flex; gap: 16px; flex-wrap: wrap; margin: 14px 0 0; color: var(--muted); font-size: 0.8rem; }
+  .legend .dot { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 5px; vertical-align: -1px; }
+
+  footer {
+    margin-top: 40px; padding-top: 16px; border-top: 1px solid var(--line);
+    color: var(--muted); font-size: 0.82rem;
+  }
+  footer p { margin: 0 0 8px; max-width: 65ch; }
+  @media (max-width: 560px) {
+    .game { grid-template-columns: 44px 1fr 72px; }
+    .game .meter { display: none; }
+    h1 { font-size: 2rem; }
+  }
+  @media (prefers-reduced-motion: no-preference) {
+    .meter .fill { transition: width 240ms ease; }
+  }
+</style>
+
+<div class="wrap">
+  <header>
+    <div class="masthead">
+      <h1>Gridiron Odds <span class="season" id="seasonLabel"></span></h1>
+      <span class="tagline display" id="genLabel"></span>
+    </div>
+  </header>
+
+  <div class="picker">
+    <div class="picker-label">Pick your team</div>
+    <div class="conf-row">
+      <span class="conf-tag">AFC</span>
+      <div class="chips" id="afcChips"></div>
+    </div>
+    <div class="conf-row">
+      <span class="conf-tag">NFC</span>
+      <div class="chips" id="nfcChips"></div>
+    </div>
+    <div class="conf-row">
+      <span class="conf-tag"></span>
+      <div class="chips"><button class="chip all" id="allBtn" aria-pressed="true">All games, week by week</button></div>
+    </div>
+  </div>
+
+  <main id="main"></main>
+
+  <footer>
+    <p><span class="badge starred">&#9733; high confidence</span> marks picks at
+    &ge;65% win probability &mdash; in an 11-season backtest those hit at 73%,
+    while all picks together hit 64.9% (the Vegas closing line manages 66%).</p>
+    <p>Probabilities come from an Elo rating blended with an XGBoost model using
+    team form, EPA, rest, weather forecasts, and snap-weighted injury reports.
+    Numbers reflect data as of the date above and sharpen as kickoff nears
+    &mdash; injury reports and forecasts only exist in game week.</p>
+  </footer>
+</div>
+
+<script>
+  const DATA = __DATA_JSON__;
+  const teams = DATA.teams;
+  const games = DATA.games;
+  let selected = null;   // team abbr or null = all games
+  let curWeek = null;
+
+  document.getElementById("seasonLabel").textContent = DATA.season;
+  document.getElementById("genLabel").textContent = "updated " + DATA.generated;
+
+  const nextWeek = (() => {
+    const up = games.filter(g => g.homeScore === null);
+    return up.length ? Math.min(...up.map(g => g.week)) : Math.max(...games.map(g => g.week));
+  })();
+  curWeek = nextWeek;
+
+  function fmtDate(iso) {
+    const d = new Date(iso + "T12:00:00");
+    return d.toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" });
+  }
+  function probFor(team, g) { return g.home === team ? g.homeProb : 1 - g.homeProb; }
+  function pick(g) { return g.homeProb >= 0.5 ? g.home : g.away; }
+  function conf(g) { return Math.max(g.homeProb, 1 - g.homeProb); }
+  function played(g) { return g.homeScore !== null; }
+  function winner(g) { return g.homeScore > g.awayScore ? g.home : g.away; }
+
+  function meter(p, isDog) {
+    return '<div class="meter" role="img" aria-label="' + Math.round(p * 100) +
+      '% win probability"><div class="fill' + (isDog ? " dog" : "") +
+      '" style="width:' + (p * 100).toFixed(0) + '%"></div><div class="mid"></div></div>';
+  }
+
+  function gameRow(g, perspective) {
+    const team = perspective || pick(g);
+    const p = probFor(team, g);
+    const isDog = p < 0.5;
+    const opp = g.home === team ? g.away : g.home;
+    const at = g.home === team ? "vs" : "@";
+    const starred = conf(g) >= 0.65;
+    let who, pctLabel;
+    if (perspective) {
+      who = '<span class="code">' + at + " " + teams[opp].name + "</span>" +
+        '<div class="sub">' + (p >= 0.5 ? "favored" : "underdog") + "</div>";
+      pctLabel = Math.round(p * 100) + "%";
+    } else {
+      const pk = pick(g);
+      who = '<span class="code' + (g.away === pk ? " fav" : "") + '">' + g.away +
+        "</span> @ <span class=\"code" + (g.home === pk ? " fav" : "") + '">' + g.home +
+        '</span><div class="sub">pick: ' + teams[pk].name + "</div>";
+      pctLabel = Math.round(conf(g) * 100) + "%";
+    }
+    let result = "";
+    if (played(g)) {
+      const hit = winner(g) === pick(g);
+      result = ' <span class="badge ' + (hit ? "hit" : "miss") + '">' +
+        g.awayScore + "–" + g.homeScore + " " + (hit ? "HIT" : "MISS") + "</span>";
+    }
+    return '<div class="game"><div class="when">Wk ' + g.week + "<br>" + fmtDate(g.date) +
+      '</div><div class="who">' + who + result + "</div>" +
+      meter(perspective ? p : conf(g), perspective ? isDog : false) +
+      '<div class="pct">' + (starred ? '<span class="star">★</span> ' : "") + pctLabel + "</div></div>";
+  }
+
+  function renderTeam(team) {
+    const sched = games.filter(g => g.home === team || g.away === team);
+    const next = sched.find(g => !played(g));
+    let html = "";
+    if (next) {
+      const p = probFor(team, next);
+      const opp = next.home === team ? next.away : next.home;
+      const at = next.home === team ? "vs" : "at";
+      html += '<div class="hero"><div class="eyebrow display">Next up &mdash; Week ' +
+        next.week + ", " + fmtDate(next.date) + "</div>" +
+        '<div class="matchup display">' + teams[team].name + " " + at + " " + teams[opp].name + "</div>" +
+        '<div class="sub">' + teams[team].division + " " + (next.home === team ? "home game" : "road game") + "</div>" +
+        '<div class="bignum">' + Math.round(p * 100) + "% <small>chance the " +
+        teams[team].name.split(" ").pop() + " win" + (conf(next) >= 0.65 ? " — ★ high confidence" : "") +
+        "</small></div></div>";
+    }
+    const done = sched.filter(played);
+    let record = "";
+    if (done.length) {
+      const hits = done.filter(g => winner(g) === pick(g)).length;
+      record = " &mdash; model " + hits + "–" + (done.length - hits) + " so far";
+    }
+    html += '<h2 class="section">Full ' + DATA.season + " schedule" + record + "</h2>";
+    html += '<div class="games">' + sched.map(g => gameRow(g, team)).join("") + "</div>";
+    html += '<div class="legend"><span><span class="dot" style="background:var(--field)"></span>' + team +
+      ' win probability</span><span><span class="dot" style="background:var(--dog)"></span>underdog</span>' +
+      "<span>marker at 50%</span></div>";
+    return html;
+  }
+
+  function renderWeek(week) {
+    const wk = games.filter(g => g.week === week);
+    const weeks = [...new Set(games.map(g => g.week))].sort((a, b) => a - b);
+    const i = weeks.indexOf(week);
+    let html = '<div class="weeknav">' +
+      '<button id="prevWk"' + (i === 0 ? " disabled" : "") + '>&larr; Wk ' + (i > 0 ? weeks[i - 1] : "") + "</button>" +
+      '<span class="wk display">Week ' + week + "</span>" +
+      '<button id="nextWk"' + (i === weeks.length - 1 ? " disabled" : "") + '>Wk ' + (i < weeks.length - 1 ? weeks[i + 1] : "") + " &rarr;</button></div>";
+    html += '<div class="games">' + wk.map(g => gameRow(g, null)).join("") + "</div>";
+    html += '<div class="legend"><span><span class="dot" style="background:var(--field)"></span>pick&rsquo;s win probability</span>' +
+      '<span class="display">green code = predicted winner</span></div>';
+    return html;
+  }
+
+  function render() {
+    const main = document.getElementById("main");
+    main.innerHTML = selected ? renderTeam(selected) : renderWeek(curWeek);
+    if (!selected) {
+      const prev = document.getElementById("prevWk"), next = document.getElementById("nextWk");
+      if (prev) prev.onclick = () => { curWeek -= 1; render(); };
+      if (next) next.onclick = () => { curWeek += 1; render(); };
+    }
+    document.querySelectorAll(".chip[data-team]").forEach(b =>
+      b.setAttribute("aria-pressed", String(b.dataset.team === selected)));
+    document.getElementById("allBtn").setAttribute("aria-pressed", String(selected === null));
+  }
+
+  const byConf = { AFC: [], NFC: [] };
+  Object.entries(teams).forEach(([abbr, t]) => byConf[t.division.split(" ")[0]].push(abbr));
+  for (const confName of ["AFC", "NFC"]) {
+    const el = document.getElementById(confName.toLowerCase() + "Chips");
+    byConf[confName]
+      .sort((a, b) => teams[a].division.localeCompare(teams[b].division) || a.localeCompare(b))
+      .forEach(abbr => {
+        const b = document.createElement("button");
+        b.className = "chip";
+        b.dataset.team = abbr;
+        b.textContent = abbr;
+        b.title = teams[abbr].name + " · " + teams[abbr].division;
+        b.setAttribute("aria-pressed", "false");
+        b.onclick = () => { selected = selected === abbr ? null : abbr; render(); };
+        el.appendChild(b);
+      });
+  }
+  document.getElementById("allBtn").onclick = () => { selected = null; render(); };
+  render();
+</script>

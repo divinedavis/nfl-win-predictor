@@ -21,6 +21,21 @@ import nflreadpy as nfl
 FIRST_SEASON = 1999
 LAST_SEASON = 2026
 INJURIES_FIRST_SEASON = 2009  # nflverse injury reports start here
+SNAPS_FIRST_SEASON = 2013     # snap counts start 2012; first full season of history
+
+# Position -> position group for injury impact features.
+POS_GROUP = {
+    "QB": "qb",
+    "RB": "rb", "FB": "rb", "HB": "rb",
+    "WR": "wr",
+    "TE": "te",
+    "T": "ol", "G": "ol", "C": "ol", "OL": "ol", "OT": "ol", "OG": "ol",
+    "DE": "dl", "DT": "dl", "NT": "dl", "DL": "dl", "EDGE": "dl",
+    "LB": "lb", "OLB": "lb", "ILB": "lb", "MLB": "lb",
+    "CB": "db", "S": "db", "FS": "db", "SS": "db", "DB": "db", "SAF": "db",
+}
+POS_GROUPS = ["qb", "rb", "wr", "te", "ol", "dl", "lb", "db"]
+DEFAULT_SNAP_SHARE = 0.15  # assumed share for a listed-out player with no snap history
 
 # Stadium coordinates for predict-time weather forecasts (outdoor games only).
 STADIUMS = {
@@ -83,9 +98,17 @@ def load_team_epa() -> pd.DataFrame:
     return ts[["season", "week", "team", "off_epa"]]
 
 
+def norm_name(name: str) -> str:
+    """Normalize a player name for joining injuries to snap counts."""
+    n = "".join(ch for ch in str(name).lower() if ch.isalpha() or ch == " ")
+    parts = [p for p in n.split() if p not in ("jr", "sr", "ii", "iii", "iv", "v")]
+    return " ".join(parts)
+
+
 def load_injury_reports() -> dict:
     """(season, week, team) -> counts of Out/Doubtful and Questionable players,
-    plus the gsis_ids of those ruled Out/Doubtful (to spot a sidelined QB)."""
+    the gsis_ids of those ruled Out/Doubtful (to spot a sidelined QB), and
+    (normalized name, position group) pairs for snap-share weighting."""
     frames = []
     for season in range(INJURIES_FIRST_SEASON, LAST_SEASON + 1):
         try:
@@ -98,15 +121,41 @@ def load_injury_reports() -> dict:
     for r in inj.itertuples(index=False):
         d = reports.setdefault(
             (r.season, r.week, r.team),
-            {"n_out": 0, "n_quest": 0, "out_ids": set()},
+            {"n_out": 0, "n_quest": 0, "out_ids": set(), "out_players": []},
         )
         if r.report_status in ("Out", "Doubtful"):
             d["n_out"] += 1
             if pd.notna(r.gsis_id):
                 d["out_ids"].add(r.gsis_id)
+            group = POS_GROUP.get(str(r.position).upper())
+            if group:
+                d["out_players"].append((norm_name(r.full_name), group))
         elif r.report_status == "Questionable":
             d["n_quest"] += 1
     return reports
+
+
+def load_snap_index() -> dict:
+    """(season, week, team) -> list of ((name, group), snap_share) for that game.
+    Share is the player's fraction of his side's snaps (offense or defense)."""
+    frames = []
+    for season in range(SNAPS_FIRST_SEASON - 1, LAST_SEASON + 1):
+        try:
+            frames.append(nfl.load_snap_counts([season]).to_pandas())
+        except Exception:
+            continue
+    sc = pd.concat(frames, ignore_index=True)
+    sc["team"] = sc["team"].map(canon)
+    index: dict = {}
+    for r in sc.itertuples(index=False):
+        group = POS_GROUP.get(str(r.position).upper())
+        if not group:
+            continue
+        share = max(r.offense_pct or 0, r.defense_pct or 0)
+        index.setdefault((r.season, r.week, r.team), []).append(
+            ((norm_name(r.player), group), share)
+        )
+    return index
 
 
 _forecast_cache: dict = {}
@@ -158,12 +207,30 @@ def build_features() -> pd.DataFrame:
         (r.season, r.week, r.team): r.off_epa for r in epa.itertuples(index=False)
     }
     injuries = load_injury_reports()
+    snaps = load_snap_index()
 
     elo: dict[str, float] = {}
     season_of: dict[str, int] = {}
     # Per-team chronological history of completed games (newest last).
     hist: dict[str, list[dict]] = {}
     last_qb: dict[str, str] = {}  # team -> gsis_id of most recent starter
+    # (name, group) -> recent snap shares (newest last), updated post-game so
+    # lookups during feature building only ever see pregame information.
+    player_shares: dict[tuple, list] = {}
+
+    def weighted_outs(team: str, season: int, week: int) -> dict:
+        """Snap-share-weighted sum of Out/Doubtful players per position group:
+        a full-time starter out ≈ +1.0, a rotational player ≈ his share."""
+        if season < SNAPS_FIRST_SEASON:
+            return {grp: np.nan for grp in POS_GROUPS}
+        rep = injuries.get((season, week, team))
+        wtd = {grp: 0.0 for grp in POS_GROUPS}
+        if rep:
+            for name, grp in rep["out_players"]:
+                shares = player_shares.get((name, grp))
+                wtd[grp] += (float(np.mean(shares[-4:])) if shares
+                             else DEFAULT_SNAP_SHARE)
+        return wtd
 
     rows = []
     for g in games.itertuples(index=False):
@@ -220,6 +287,9 @@ def build_features() -> pd.DataFrame:
         h_qb_changed = qb_changed(home, g.home_qb_id, h_out_ids)
         a_qb_changed = qb_changed(away, g.away_qb_id, a_out_ids)
 
+        h_wtd = weighted_outs(home, g.season, g.week)
+        a_wtd = weighted_outs(away, g.season, g.week)
+
         # Weather: recorded temp/wind for past games; forecast for upcoming
         # outdoor games inside Open-Meteo's 16-day horizon.
         temp, wind = g.temp, g.wind
@@ -253,6 +323,8 @@ def build_features() -> pd.DataFrame:
             "home_n_out": h_out, "away_n_out": a_out,
             "home_n_quest": h_quest, "away_n_quest": a_quest,
             "home_qb_changed": h_qb_changed, "away_qb_changed": a_qb_changed,
+            **{f"home_{grp}_out_wt": h_wtd[grp] for grp in POS_GROUPS},
+            **{f"away_{grp}_out_wt": a_wtd[grp] for grp in POS_GROUPS},
             "home_pdiff8": rh["pdiff"], "away_pdiff8": ra["pdiff"],
             "pdiff8_diff": rh["pdiff"] - ra["pdiff"],
             "home_winrate8": rh["winrate"], "away_winrate8": ra["winrate"],
@@ -294,6 +366,9 @@ def build_features() -> pd.DataFrame:
                 last_qb[home] = g.home_qb_id
             if pd.notna(g.away_qb_id):
                 last_qb[away] = g.away_qb_id
+            for team in (home, away):
+                for key, share in snaps.get((g.season, g.week, team), []):
+                    player_shares.setdefault(key, []).append(share)
 
     return pd.DataFrame(rows)
 
@@ -305,6 +380,8 @@ FEATURES = [
     "temp", "wind",
     "home_n_out", "away_n_out", "home_n_quest", "away_n_quest",
     "home_qb_changed", "away_qb_changed",
+    *[f"home_{grp}_out_wt" for grp in POS_GROUPS],
+    *[f"away_{grp}_out_wt" for grp in POS_GROUPS],
     "home_pdiff8", "away_pdiff8", "pdiff8_diff",
     "home_winrate8", "away_winrate8",
     "home_pf8", "home_pa8", "away_pf8", "away_pa8",
