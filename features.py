@@ -52,6 +52,10 @@ DEF_POSITIONS = ["DE", "DT", "NT", "DL", "LB", "OLB", "ILB", "MLB",
 DEFAULT_SNAP_SHARE = 0.15  # assumed share for a listed-out player with no snap history
 RATING_WINDOW = 10   # games in a player's rolling value
 RATING_SHRINK = 3    # pseudo-games of league-average (0) mixed in
+# Box scores underrate block-eaters (a double-teamed NT frees teammates but
+# shows no sacks), so a defender's value is floored by his playing time:
+# a 100%-snap defender never rates below this, whatever his stat line.
+DEF_SNAP_VALUE_FLOOR = 1.5
 
 # Stadium coordinates for predict-time weather forecasts (outdoor games only).
 STADIUMS = {
@@ -317,6 +321,10 @@ def build_features() -> pd.DataFrame:
             for p in rep["out_players"]:
                 if p["group"] in VALUE_GROUPS and p["gsis"]:
                     val = rating(p["gsis"])
+                    if p["group"] in DEF_GROUPS:
+                        shares = player_shares.get((p["norm"], p["group"]))
+                        share = float(np.mean(shares[-4:])) if shares else 0.0
+                        val = max(val, DEF_SNAP_VALUE_FLOOR * share)
                     out_val[p["group"]] += val
                     names.append((val, f'{p["pos"]} {p["name"]} ({val:+.1f})'))
                 elif p["group"] == "ol":
