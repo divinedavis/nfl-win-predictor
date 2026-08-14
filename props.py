@@ -21,7 +21,7 @@ import nflreadpy as nfl
 from xgboost import XGBRegressor
 
 from features import (LAST_SEASON, canon, load_depth_qb1,
-                      load_injury_reports, norm_name)
+                      load_injury_reports, load_ir_index, norm_name)
 
 FIRST_SEASON = 2006          # modern passing era; enough history for training
 QUANTILES = [0.10, 0.25, 0.50, 0.75, 0.90]
@@ -391,7 +391,15 @@ def project() -> None:
     ngs_map = {pid: grp for pid, grp in ngs.groupby("player_id")}
     cur_team = load_current_teams()
     depth_qb1 = load_depth_qb1()
+    ir_index, ir_latest = load_ir_index()
     season, week = upcoming_week(ctx)
+
+    def team_ir(team: str) -> set:
+        players = ir_index.get((season, week, team))
+        if players is None:
+            latest = ir_latest.get((season, team))  # same season only —
+            players = latest[1] if latest else []   # last year's IR is stale
+        return {p["gsis"] for p in players}
     week_ctx = ctx[(ctx.season == season) & (ctx.week == week)]
     print(f"Projecting {season} week {week} "
           f"({len(week_ctx)} team slates)")
@@ -489,6 +497,23 @@ def project() -> None:
                 "vacated_share": vac, "n_out_skill": n_out,
             }])
             q = predict_quantiles(models, row, FEATS_V2)[0]
+            # History vs THIS opponent (team level — CB-on-WR matchup data
+            # is not public), for the dashboard's context line.
+            vs = h[h["opponent_team"] == game.opp]
+            vs_log = ";".join(f"'{int(v.season) % 100} wk{int(v.week)}: {v.y:g}"
+                              for v in vs.tail(5).itertuples(index=False))
+            # Active status: game-week injury report + same-season IR list.
+            pnorm = norm_name(r.player_display_name)
+            status = ""
+            if rep:
+                if any(p.get("gsis") == r.player_id or p["norm"] == pnorm
+                       for p in rep["out_players"]):
+                    status = "OUT"
+                elif any(p.get("gsis") == r.player_id or p["norm"] == pnorm
+                         for p in rep.get("quest_players", [])):
+                    status = "Q"
+            if not status and r.player_id in team_ir(team_now):
+                status = "IR"
             out_rows.append({
                 "season": season, "week": week, "stat": stat,
                 "player_id": r.player_id, "player": r.player_display_name,
@@ -497,6 +522,11 @@ def project() -> None:
                 "p10": round(q[0], 1), "p25": round(q[1], 1),
                 "p50": round(q[2], 1), "p75": round(q[3], 1),
                 "p90": round(q[4], 1),
+                "vs_opp_n": len(vs),
+                "vs_opp_avg": round(float(vs["y"].mean()), 1) if len(vs) else None,
+                "vs_opp_log": vs_log,
+                "career_avg": round(float(h["y"].mean()), 1),
+                "status": status,
             })
 
     out = pd.DataFrame(out_rows).sort_values(["stat", "p50"], ascending=[True, False])

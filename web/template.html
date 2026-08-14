@@ -26,6 +26,8 @@
     --star-soft: #F4EBD7;
     --track: #ECEAE1;
     --dog: #9AA3AD;
+    --alert: #B23B31;
+    --alert-soft: #F6E2DF;
   }
   @media (prefers-color-scheme: dark) {
     :root:not([data-theme="light"]) {
@@ -40,6 +42,8 @@
       --star-soft: #33301F;
       --track: #26303B;
       --dog: #55616D;
+      --alert: #E0685C;
+      --alert-soft: #3A2320;
     }
   }
   :root[data-theme="dark"] {
@@ -54,6 +58,8 @@
     --star-soft: #33301F;
     --track: #26303B;
     --dog: #55616D;
+    --alert: #E0685C;
+    --alert-soft: #3A2320;
   }
   * { box-sizing: border-box; }
   body {
@@ -207,6 +213,7 @@
   .badge.miss { background: var(--track); color: var(--muted); }
   .badge.starred { background: var(--star-soft); color: var(--star); }
   .badge.upset { background: var(--star-soft); color: var(--star); border: 1px solid var(--star); }
+  .badge.alert { background: var(--alert-soft); color: var(--alert); }
 
   .ats-hot { color: var(--field); font-weight: 700; }
   .betlist {
@@ -491,16 +498,41 @@
         "</b> with a " + pctOf(a.cover) + " cover chance. ATS leans covered 55% " +
         "over 11 seasons (breakeven 52.4%) — tracked live this season.");
     }
-    out.push(conf(g) >= 0.65
-      ? "<b>Confidence:</b> ★ at " + pctOf(conf(g)) + " this sits in the high-confidence tier — 74% correct across an 11-season backtest."
-      : "<b>Confidence:</b> " + pctOf(conf(g)) + " is below the 65% star line — treat it as a lean, not a lock.");
     return out;
   }
 
+  function playerLine(p) {
+    const st = p.st === "OUT" || p.st === "IR"
+      ? ' <span class="badge alert">' + p.st + "</span>"
+      : p.st === "Q" ? ' <span class="badge starred">Q</span>' : "";
+    let vs = "";
+    if (p.vsN > 0 && p.vsA != null) {
+      vs = " &middot; vs this D: avg " + p.vsA + " in " + p.vsN +
+        (p.vsN > 1 ? " games" : " game");
+      if (p.vsN >= 2 && p.car != null)
+        vs += p.vsA > p.car ? " — <b>runs high</b> vs them (career " + p.car + ")"
+                            : " — <b>runs low</b> vs them (career " + p.car + ")";
+    }
+    return "<li><b>" + p.n + "</b> " + p.pos + st +
+      " — proj " + p.v + " " + p.u + vs + "</li>";
+  }
+
   function whyPanel(g) {
-    return '<div class="why"><div class="why-label display">Why ' +
+    const f = g.f || {};
+    let html = '<div class="why"><div class="why-label display">Why ' +
       teams[pick(g)].name + "</div><ul>" +
-      whyBullets(g).map(b => "<li>" + b + "</li>").join("") + "</ul></div>";
+      whyBullets(g).map(b => "<li>" + b + "</li>").join("") + "</ul>";
+    if ((f.playersA || []).length || (f.playersH || []).length) {
+      html += '<div class="why-label display" style="margin-top:12px">Key players &mdash; status &amp; history vs this defense</div>';
+      for (const [code, ps] of [[g.away, f.playersA], [g.home, f.playersH]]) {
+        if ((ps || []).length)
+          html += '<div class="sub" style="margin:4px 0 2px"><b>' + code +
+            "</b></div><ul>" + ps.map(playerLine).join("") + "</ul>";
+      }
+      html += '<div class="sub" style="margin-top:6px">Status: game-week injury reports; ' +
+        "no badge = no report. History is vs this franchise&rsquo;s defense (personnel changes year to year).</div>";
+    }
+    return html + "</div>";
   }
 
   function gameRow(g, perspective) {
@@ -630,9 +662,21 @@
     const x = v => Math.min(100, Math.max(0, (v - lo) / span * 100));
     const band = (a, b, cls) => '<div class="' + cls + '" style="left:' +
       x(a).toFixed(1) + '%;width:' + Math.max(x(b) - x(a), 1).toFixed(1) + '%"></div>';
+    const st = p.status === "OUT" || p.status === "IR"
+      ? ' <span class="badge alert">' + p.status + "</span>"
+      : p.status === "Q" ? ' <span class="badge starred">Questionable</span>' : "";
+    let hist = "";
+    if (p.vsN > 0 && p.vsAvg != null) {
+      const tilt = p.vsN >= 2 && p.carAvg
+        ? (p.vsAvg > p.carAvg ? " — runs high vs them" : " — runs low vs them") : "";
+      hist = '<div class="sub" title="' + p.vsLog.replaceAll(";", " · ") + '">vs ' +
+        p.opp + ": avg " + p.vsAvg + " in " + p.vsN +
+        (p.vsN > 1 ? " games" : " game") +
+        (p.carAvg ? " (career " + p.carAvg + ")" : "") + tilt + "</div>";
+    }
     return '<div class="prop-row">' +
-      '<div class="who"><span class="code">' + p.player + '</span>' +
-      '<div class="sub">' + p.pos + " · " + p.team + '</div></div>' +
+      '<div class="who"><span class="code">' + p.player + "</span>" + st +
+      '<div class="sub">' + p.pos + " · " + p.team + "</div>" + hist + "</div>" +
       '<div class="vs">' + (p.home ? "vs " : "@ ") + p.opp + '</div>' +
       '<div class="rng" role="img" aria-label="80% range ' + p.p10 + " to " + p.p90 + '">' +
       band(p.p10, p.p90, "band80") + band(p.p25, p.p75, "band50") +

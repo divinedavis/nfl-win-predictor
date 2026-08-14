@@ -81,6 +81,11 @@ def props_payload():
             "opp": r.opp, "home": bool(r.is_home),
             "p10": r.p10, "p25": r.p25, "p50": r.p50,
             "p75": r.p75, "p90": r.p90,
+            "status": getattr(r, "status", "") or "",
+            "vsN": int(getattr(r, "vs_opp_n", 0) or 0),
+            "vsAvg": _f(getattr(r, "vs_opp_avg", None), 1),
+            "vsLog": getattr(r, "vs_opp_log", "") or "",
+            "carAvg": _f(getattr(r, "career_avg", None), 1),
         } for r in d.itertuples(index=False)]
         if players:
             stats.append({"key": stat, "label": label, "players": players})
@@ -160,6 +165,30 @@ def main() -> None:
         for r in pd.read_csv(odds_path).itertuples(index=False):
             spread_prices.setdefault((r.home, r.away), {})[r.side] = int(r.price)
 
+    # Key players per team for the expanded game panel: QB + top receivers +
+    # top rusher, with active status and history vs this week's opponent.
+    UNIT = {"passing_yards": "pass yds", "rushing_yards": "rush yds",
+            "receiving_yards": "rec yds"}
+    team_players: dict = {}
+    proj_path = Path("props_projections.csv")
+    if proj_path.exists():
+        proj = pd.read_csv(proj_path)
+        keep = []
+        for team, grp in proj.groupby("team"):
+            qb = grp[grp.stat == "passing_yards"].nlargest(1, "p50")
+            rec = grp[grp.stat == "receiving_yards"].nlargest(2, "p50")
+            ru = grp[(grp.stat == "rushing_yards") & (grp.position == "RB")
+                     ].nlargest(1, "p50")
+            keep.append(pd.concat([qb, rec, ru]))
+        for r in pd.concat(keep).itertuples(index=False):
+            team_players.setdefault((r.team, r.opp), []).append({
+                "n": r.player, "pos": r.position, "u": UNIT.get(r.stat, ""),
+                "v": _f(r.p50, 0), "st": (r.status if isinstance(r.status, str)
+                                          else "") or "",
+                "vsN": int(r.vs_opp_n or 0), "vsA": _f(r.vs_opp_avg, 1),
+                "car": _f(r.career_avg, 1),
+            })
+
     games = []
     for r in season.sort_values(["week", "gameday"]).itertuples(index=False):
         # Everything the "why this pick" panel cites, keyed H/A. Kept raw —
@@ -189,6 +218,8 @@ def main() -> None:
             "offH": _f(r.home_off_epa8, 1), "offA": _f(r.away_off_epa8, 1),
             "defH": _f(r.home_def_epa8, 1), "defA": _f(r.away_def_epa8, 1),
         }
+        factors["playersH"] = team_players.get((r.home_team, r.away_team), [])
+        factors["playersA"] = team_players.get((r.away_team, r.home_team), [])
         fav_is_home = r.home_prob >= 0.5
         fav_out = r.home_starters_out if fav_is_home else r.away_starters_out
         opp_out = r.away_starters_out if fav_is_home else r.home_starters_out
