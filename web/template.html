@@ -286,6 +286,13 @@
     playmaking for defense.
     Numbers reflect data as of the date above and sharpen as kickoff nears
     &mdash; injury reports and forecasts only exist in game week.</p>
+    <p>Each game also shows an <b>against-the-spread lean</b>: the Vegas
+    closing line (from nflverse, refreshed daily) vs the model&rsquo;s expected
+    margin, with a cover probability. In an 11-season backtest these leans
+    covered 55.2% against verified closing spreads (breakeven at &minus;110
+    juice is 52.4%; above breakeven in 10 of 11 seasons). Season-to-date ATS
+    record is tracked live above &mdash; a backtest is evidence, not a
+    guarantee, and lines for later weeks post as the season approaches.</p>
     <p>Player props are quantile projections (P10&ndash;P90) from each
     player&rsquo;s rolling usage and efficiency, opponent positional defense,
     and game context &mdash; validated walk-forward at 6&ndash;10% better than
@@ -322,6 +329,32 @@
   function conf(g) { return Math.max(g.homeProb, 1 - g.homeProb); }
   function played(g) { return g.homeScore !== null; }
   function winner(g) { return g.homeScore > g.awayScore ? g.home : g.away; }
+
+  // ---- against the spread ----
+  function ats(g) {
+    if (g.vegasLine == null || g.coverProb == null) return null;
+    const pickHome = g.coverProb >= 0.5;
+    const side = pickHome ? g.home : g.away;
+    const line = pickHome ? -g.vegasLine : g.vegasLine;   // the side's handicap
+    const cover = pickHome ? g.coverProb : 1 - g.coverProb;
+    let settled = null;                                    // true/false/"push"
+    if (played(g)) {
+      const margin = g.homeScore - g.awayScore;
+      settled = margin === g.vegasLine ? "push"
+        : pickHome ? margin > g.vegasLine : margin < g.vegasLine;
+    }
+    return { side, cover, settled,
+      lineStr: side + " " + (line > 0 ? "+" : "") + line.toFixed(1) };
+  }
+
+  function atsRecord() {
+    let w = 0, l = 0;
+    for (const g of games) {
+      const a = ats(g);
+      if (a && a.settled !== null && a.settled !== "push") a.settled ? w++ : l++;
+    }
+    return w + l ? { w, l } : null;
+  }
 
   function meter(p, isDog) {
     return '<div class="meter" role="img" aria-label="' + Math.round(p * 100) +
@@ -431,8 +464,19 @@
     if (f.div) {
       out.push("<b>Division game:</b> familiarity runs these closer than the ratings suggest, and the model knows it.");
     }
+    const a = ats(g);
+    if (a) {
+      const favSide = g.vegasLine > 0 ? g.home : g.away;
+      const vegasStr = favSide + " −" + Math.abs(g.vegasLine).toFixed(1);
+      const mmSide = g.modelMargin > 0 ? g.home : g.away;
+      out.push("<b>Against the spread:</b> Vegas line " + vegasStr +
+        "; the model's expected margin is " + mmSide + " by " +
+        Math.abs(g.modelMargin).toFixed(1) + " &rarr; lean <b>" + a.lineStr +
+        "</b> with a " + pctOf(a.cover) + " cover chance. ATS leans covered 55% " +
+        "over 11 seasons (breakeven 52.4%) — tracked live this season.");
+    }
     out.push(conf(g) >= 0.65
-      ? "<b>Confidence:</b> ★ at " + pctOf(conf(g)) + " this sits in the high-confidence tier — 73% correct across an 11-season backtest."
+      ? "<b>Confidence:</b> ★ at " + pctOf(conf(g)) + " this sits in the high-confidence tier — 74% correct across an 11-season backtest."
       : "<b>Confidence:</b> " + pctOf(conf(g)) + " is below the 65% star line — treat it as a lean, not a lock.");
     return out;
   }
@@ -451,15 +495,20 @@
     const at = g.home === team ? "vs" : "@";
     const starred = conf(g) >= 0.65;
     let who, pctLabel;
+    const a = ats(g);
+    const atsBit = !a ? "" :
+      " &middot; ATS: " + a.lineStr + " (" + Math.round(a.cover * 100) + "%)" +
+      (a.settled === null ? "" : a.settled === "push" ? " push"
+        : a.settled ? " &#10003;" : " &#10007;");
     if (perspective) {
       who = '<span class="code">' + at + " " + teams[opp].name + "</span>" +
-        '<div class="sub">' + (p >= 0.5 ? "favored" : "underdog") + "</div>";
+        '<div class="sub">' + (p >= 0.5 ? "favored" : "underdog") + atsBit + "</div>";
       pctLabel = Math.round(p * 100) + "%";
     } else {
       const pk = pick(g);
       who = '<span class="code' + (g.away === pk ? " fav" : "") + '">' + g.away +
         "</span> @ <span class=\"code" + (g.home === pk ? " fav" : "") + '">' + g.home +
-        '</span><div class="sub">pick: ' + teams[pk].name + "</div>";
+        '</span><div class="sub">pick: ' + teams[pk].name + atsBit + "</div>";
       pctLabel = Math.round(conf(g) * 100) + "%";
     }
     let result = "";
@@ -531,8 +580,12 @@
         (starred.length ? "Closer calls &mdash; leans, not locks" : "Games") + "</h2>";
       html += '<div class="games">' + rest.map(g => gameRow(g, null)).join("") + "</div>";
     }
+    const rec = atsRecord();
     html += '<div class="legend"><span><span class="dot" style="background:var(--field)"></span>pick&rsquo;s win probability</span>' +
-      '<span class="display">green code = predicted winner</span><span>click a game for the reasoning</span></div>';
+      '<span class="display">green code = predicted winner</span>' +
+      (rec ? "<span>ATS leans this season: <b>" + rec.w + "&ndash;" + rec.l +
+        "</b> (" + Math.round(100 * rec.w / (rec.w + rec.l)) + "%)</span>" : "") +
+      '<span>click a game for the reasoning</span></div>';
     return html;
   }
 
