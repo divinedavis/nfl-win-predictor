@@ -9,10 +9,11 @@ from datetime import date
 from pathlib import Path
 
 import pandas as pd
+import nflreadpy as nfl
 from xgboost import XGBClassifier
 
 from features import (DEF_GROUPS, FEATURES, LAST_SEASON, OFF_GROUPS,
-                      POS_GROUPS)
+                      POS_GROUPS, canon, load_team_epa)
 from train import ELO_BLEND
 
 # Favorites missing ~3 starters vs a healthy opponent won 62% (2013-2025)
@@ -208,20 +209,75 @@ def main() -> None:
                 entry["lp"] = _f(max(p_over, 1 - p_over), 2)
             team_players.setdefault((r.team, r.opp), []).append(entry)
 
+    # ---- situational context (home/road records, coaches, offense style) ----
+    done_all = df[df["home_win"].notna()].sort_values(["gameday", "game_id"])
+    home_hist: dict = {}
+    road_hist: dict = {}
+    won_map: dict = {}
+    for r in done_all.itertuples(index=False):
+        home_hist.setdefault(r.home_team, []).append(int(r.home_win))
+        road_hist.setdefault(r.away_team, []).append(1 - int(r.home_win))
+        won_map[(r.season, r.week, r.home_team)] = int(r.home_win)
+        won_map[(r.season, r.week, r.away_team)] = 1 - int(r.home_win)
+
+    def rec16(hist: dict, team: str) -> str:
+        g = hist.get(team, [])[-16:]
+        return f"{sum(g)}-{len(g) - sum(g)}" if g else ""
+
+    sched_all = nfl.load_schedules(list(range(1999, LAST_SEASON + 1))).to_pandas()
+    coach_wins: dict = {}
+    game_coaches: dict = {}
+    for r in sched_all.itertuples(index=False):
+        if pd.notna(r.home_coach) and pd.notna(r.away_coach):
+            game_coaches[r.game_id] = (r.home_coach, r.away_coach)
+            if pd.notna(r.home_score) and r.home_score != r.away_score:
+                w = r.home_coach if r.home_score > r.away_score else r.away_coach
+                l = r.away_coach if r.home_score > r.away_score else r.home_coach
+                coach_wins[(w, l)] = coach_wins.get((w, l), 0) + 1
+
+    # Offense style: rush share of plays, last 8 team-games; 30+ carry games.
+    ts = load_team_epa()
+    ts = ts[ts["attempts"].notna() & ts["carries"].notna()]
+    ts = ts.sort_values(["season", "week"])
+    style: dict = {}
+    grind: dict = {}
+    for team, grp in ts.groupby("team"):
+        t8 = grp.tail(8)
+        share = float(t8["carries"].sum()
+                      / max(t8["carries"].sum() + t8["attempts"].sum(), 1))
+        style[team] = share
+        t16 = grp.tail(16)
+        hits = [(int(g.carries >= 30),
+                 won_map.get((g.season, g.week, team), 0))
+                for g in t16.itertuples(index=False)]
+        n30 = sum(h for h, _ in hits)
+        w30 = sum(w for h, w in hits if h)
+        grind[team] = (n30, w30)
+    style_rank = {t: i + 1 for i, t in enumerate(
+        sorted(style, key=style.get, reverse=True))}  # 1 = most run-heavy
+    recent = ts[ts["season"] >= 2015]
+    league30 = float(np.mean([won_map.get((g.season, g.week, g.team), 0)
+                              for g in recent[recent["carries"] >= 30]
+                              .itertuples(index=False)]))
+
     # Current league ranks (1 = fewest allowed) from each team's most recent
     # rolling value — their next game row carries the as-of-now number.
     rank_of: dict = {}
     ordered = season.sort_values(["week", "gameday"])
-    for metric, hcol, acol in [("pa", "home_pa8", "away_pa8"),
-                               ("rushAll", "home_rush_all8", "away_rush_all8"),
-                               ("passAll", "home_pass_all8", "away_pass_all8")]:
+    for metric, hcol, acol, desc in [
+            ("pa", "home_pa8", "away_pa8", False),          # fewer = better D
+            ("rushAll", "home_rush_all8", "away_rush_all8", False),
+            ("passAll", "home_pass_all8", "away_pass_all8", False),
+            ("pf", "home_pf8", "away_pf8", True),           # more = better O
+            ("rushOff", "home_rush_off8", "away_rush_off8", True),
+            ("passOff", "home_pass_off8", "away_pass_off8", True)]:
         vals: dict = {}
         for r in ordered.itertuples(index=False):
             for team, col in ((r.home_team, hcol), (r.away_team, acol)):
                 v = getattr(r, col)
                 if team not in vals and pd.notna(v):
                     vals[team] = v
-        ranked = sorted(vals, key=vals.get)
+        ranked = sorted(vals, key=vals.get, reverse=desc)
         rank_of[metric] = {t: i + 1 for i, t in enumerate(ranked)}
 
     games = []
@@ -255,12 +311,37 @@ def main() -> None:
             "paH": _f(r.home_pa8, 1), "paA": _f(r.away_pa8, 1),
             "passAllH": _f(r.home_pass_all8, 0), "passAllA": _f(r.away_pass_all8, 0),
             "rushAllH": _f(r.home_rush_all8, 0), "rushAllA": _f(r.away_rush_all8, 0),
+            "hRec": rec16(home_hist, r.home_team),
+            "aRec": rec16(road_hist, r.away_team),
+            "coachH": game_coaches.get(r.game_id, ("", ""))[0],
+            "coachA": game_coaches.get(r.game_id, ("", ""))[1],
+            "h2hHW": coach_wins.get((game_coaches.get(r.game_id, ("", ""))[0],
+                                     game_coaches.get(r.game_id, ("", ""))[1]), 0),
+            "h2hAW": coach_wins.get((game_coaches.get(r.game_id, ("", ""))[1],
+                                     game_coaches.get(r.game_id, ("", ""))[0]), 0),
+            "styShH": _f(style.get(r.home_team), 2),
+            "styShA": _f(style.get(r.away_team), 2),
+            "styRkH": style_rank.get(r.home_team),
+            "styRkA": style_rank.get(r.away_team),
+            "g30nH": grind.get(r.home_team, (0, 0))[0],
+            "g30wH": grind.get(r.home_team, (0, 0))[1],
+            "g30nA": grind.get(r.away_team, (0, 0))[0],
+            "g30wA": grind.get(r.away_team, (0, 0))[1],
             "paRkH": rank_of["pa"].get(r.home_team),
             "paRkA": rank_of["pa"].get(r.away_team),
             "rushRkH": rank_of["rushAll"].get(r.home_team),
             "rushRkA": rank_of["rushAll"].get(r.away_team),
             "passRkH": rank_of["passAll"].get(r.home_team),
             "passRkA": rank_of["passAll"].get(r.away_team),
+            "pfH": _f(r.home_pf8, 1), "pfA": _f(r.away_pf8, 1),
+            "pfRkH": rank_of["pf"].get(r.home_team),
+            "pfRkA": rank_of["pf"].get(r.away_team),
+            "rushOffH": _f(r.home_rush_off8, 0), "rushOffA": _f(r.away_rush_off8, 0),
+            "rushOffRkH": rank_of["rushOff"].get(r.home_team),
+            "rushOffRkA": rank_of["rushOff"].get(r.away_team),
+            "passOffH": _f(r.home_pass_off8, 0), "passOffA": _f(r.away_pass_off8, 0),
+            "passOffRkH": rank_of["passOff"].get(r.home_team),
+            "passOffRkA": rank_of["passOff"].get(r.away_team),
         }
         factors["playersH"] = team_players.get((r.home_team, r.away_team), [])
         factors["playersA"] = team_players.get((r.away_team, r.home_team), [])
@@ -292,6 +373,7 @@ def main() -> None:
                   for abbr, (name, div) in TEAMS.items()},
         "games": games,
         "props": props_payload(),
+        "run30": round(league30, 2),
     }
 
     template = Path("web/template.html").read_text()

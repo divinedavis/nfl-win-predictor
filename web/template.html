@@ -412,20 +412,48 @@
     const ord = n => n == null ? "" :
       " (" + n + (n % 10 == 1 && n != 11 ? "st" : n % 10 == 2 && n != 12 ? "nd"
         : n % 10 == 3 && n != 13 ? "rd" : "th") + ")";
-    if (P("pa") != null && O("pa") != null) {
-      out.push("<b>Points allowed (per game, last 8):</b> " + pk + " " +
-        P("pa").toFixed(1) + ord(P("paRk")) + " — " + opp + " " +
-        O("pa").toFixed(1) + ord(O("paRk")) + ".");
+    const matchup = (dSide, dP, oSide, oP) => {
+      if (dP("pa") == null || oP("pf") == null) return;
+      out.push("<b>" + dSide + " defense vs " + oSide + " offense (per game, last 8):</b> " +
+        "points: allows " + dP("pa").toFixed(1) + ord(dP("paRk")) +
+        " vs scores " + oP("pf").toFixed(1) + ord(oP("pfRk")) +
+        " &middot; rush: allows " + dP("rushAll") + ord(dP("rushRk")) +
+        " vs gains " + oP("rushOff") + ord(oP("rushOffRk")) +
+        " &middot; pass: allows " + dP("passAll") + ord(dP("passRk")) +
+        " vs gains " + oP("passOff") + ord(oP("passOffRk")) +
+        " (D ranks: 1 = stingiest; O ranks: 1 = most productive).");
+    };
+    matchup(pk, P, opp, O);
+    matchup(opp, O, pk, P);
+    if (f.hRec && f.aRec) {
+      out.push("<b>Home &amp; road:</b> " + g.home + " are " + f.hRec +
+        " in their last 16 at home; " + g.away + " are " + f.aRec +
+        " in their last 16 on the road.");
     }
-    if (P("rushAll") != null && O("rushAll") != null) {
-      out.push("<b>Rush yards allowed:</b> " + pk + " " + P("rushAll") +
-        "/gm" + ord(P("rushRk")) + " — " + opp + " " + O("rushAll") +
-        "/gm" + ord(O("rushRk")) + ".");
+    if (f.coachH && f.coachA) {
+      const n = f.h2hHW + f.h2hAW;
+      out.push("<b>Coaches:</b> " + f.coachH + " vs " + f.coachA + " — " +
+        (n === 0 ? "first meeting."
+          : f.h2hHW >= f.h2hAW
+            ? f.coachH + " leads " + f.h2hHW + "&ndash;" + f.h2hAW + "."
+            : f.coachA + " leads " + f.h2hAW + "&ndash;" + f.h2hHW + ".") +
+        " <i>(Head-to-head coaching records don&rsquo;t predict outcomes beyond " +
+        "team strength — we tested 1,711 matchups.)</i>");
     }
-    if (P("passAll") != null && O("passAll") != null) {
-      out.push("<b>Pass yards allowed:</b> " + pk + " " + P("passAll") +
-        "/gm" + ord(P("passRk")) + " — " + opp + " " + O("passAll") +
-        "/gm" + ord(O("passRk")) + ".");
+    if (f.styShH != null && f.styShA != null) {
+      const sty = (sh, rk) => Math.round(sh * 100) + "% rush rate" + ord(rk) +
+        (rk <= 10 ? " — run-leaning" : rk >= 23 ? " — pass-first" : "");
+      out.push("<b>Offense style:</b> " + g.home + " " +
+        sty(f.styShH, f.styRkH) + "; " + g.away + " " + sty(f.styShA, f.styRkA) +
+        " (rank 1 = most run-heavy).");
+    }
+    if (f.g30nH != null && DATA.run30) {
+      out.push("<b>Run-game factor:</b> teams that rush 30+ times win " +
+        Math.round(DATA.run30 * 100) + "% league-wide — largely an <i>effect</i> of " +
+        "protecting a lead, not a cause. " + g.home + " did it " + f.g30nH +
+        " times in their last 16 (" + f.g30wH + "-" + (f.g30nH - f.g30wH) +
+        "); " + g.away + " " + f.g30nA + " times (" + f.g30wA + "-" +
+        (f.g30nA - f.g30wA) + ").");
     }
     if (f.qbNameH && f.qbNameA) {
       const better = f.qbValH >= f.qbValA;

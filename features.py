@@ -136,7 +136,7 @@ def load_team_epa() -> pd.DataFrame:
     """Per team-game offensive EPA, turnover margin, and sack counts,
     keyed by (season, week, team)."""
     cols = ["season", "week", "team", "passing_epa", "rushing_epa",
-            "passing_yards", "rushing_yards",
+            "passing_yards", "rushing_yards", "attempts", "carries",
             "passing_interceptions", "fumbles_lost_total",
             "def_interceptions", "fumble_recovery_opp",
             "sacks_suffered", "def_sacks"]
@@ -157,7 +157,7 @@ def load_team_epa() -> pd.DataFrame:
     )
     return ts[["season", "week", "team", "off_epa", "to_margin",
                "sacks_suffered", "def_sacks", "passing_yards",
-               "rushing_yards"]]
+               "rushing_yards", "attempts", "carries"]]
 
 
 def load_ftn_defense() -> dict:
@@ -590,7 +590,8 @@ def build_features() -> pd.DataFrame:
             past = hist[team][-ROLL_N:]
             keys = ["pdiff", "winrate", "pf", "pa", "off_epa", "def_epa",
                     "pyth", "luck", "to_margin", "sacked", "def_sacks",
-                    "blitz_rate", "rushers", "pass_allowed", "rush_allowed"]
+                    "blitz_rate", "rushers", "pass_allowed", "rush_allowed",
+                    "pass_off", "rush_off"]
             if not past:
                 return dict.fromkeys(keys, np.nan)
             out = {
@@ -759,9 +760,11 @@ def build_features() -> pd.DataFrame:
             "away_pf8": ra["pf"], "away_pa8": ra["pa"],
             "home_off_epa8": rh["off_epa"], "away_off_epa8": ra["off_epa"],
             "home_def_epa8": rh["def_epa"], "away_def_epa8": ra["def_epa"],
-            # display-only defense context (per game, last 8)
+            # display-only matchup context (per game, last 8)
             "home_pass_all8": rh["pass_allowed"], "away_pass_all8": ra["pass_allowed"],
             "home_rush_all8": rh["rush_allowed"], "away_rush_all8": ra["rush_allowed"],
+            "home_pass_off8": rh["pass_off"], "away_pass_off8": ra["pass_off"],
+            "home_rush_off8": rh["rush_off"], "away_rush_off8": ra["rush_off"],
             "off_epa8_diff": rh["off_epa"] - ra["off_epa"],
             "def_epa8_diff": rh["def_epa"] - ra["def_epa"],
             # --- upset indicators (candidate features, ablation-tested) ---
@@ -821,12 +824,14 @@ def build_features() -> pd.DataFrame:
                                "won": float(margin > 0), "off_epa": h_epa,
                                "def_epa": a_epa,
                                "pass_allowed": a_yds[0], "rush_allowed": a_yds[1],
+                               "pass_off": h_yds[0], "rush_off": h_yds[1],
                                "div_win": float(margin > 0 and g.div_game == 1),
                                **game_stats(home)})
             hist[away].append({"pf": g.away_score, "pa": g.home_score,
                                "won": float(margin < 0), "off_epa": a_epa,
                                "def_epa": h_epa,
                                "pass_allowed": h_yds[0], "rush_allowed": h_yds[1],
+                               "pass_off": a_yds[0], "rush_off": a_yds[1],
                                "div_win": float(margin < 0 and g.div_game == 1),
                                **game_stats(away)})
             if g.game_type == "REG":
