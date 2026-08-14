@@ -189,6 +189,22 @@ def main() -> None:
                 "car": _f(r.career_avg, 1),
             })
 
+    # Current league ranks (1 = fewest allowed) from each team's most recent
+    # rolling value — their next game row carries the as-of-now number.
+    rank_of: dict = {}
+    ordered = season.sort_values(["week", "gameday"])
+    for metric, hcol, acol in [("pa", "home_pa8", "away_pa8"),
+                               ("rushAll", "home_rush_all8", "away_rush_all8"),
+                               ("passAll", "home_pass_all8", "away_pass_all8")]:
+        vals: dict = {}
+        for r in ordered.itertuples(index=False):
+            for team, col in ((r.home_team, hcol), (r.away_team, acol)):
+                v = getattr(r, col)
+                if team not in vals and pd.notna(v):
+                    vals[team] = v
+        ranked = sorted(vals, key=vals.get)
+        rank_of[metric] = {t: i + 1 for i, t in enumerate(ranked)}
+
     games = []
     for r in season.sort_values(["week", "gameday"]).itertuples(index=False):
         # Everything the "why this pick" panel cites, keyed H/A. Kept raw —
@@ -217,6 +233,15 @@ def main() -> None:
             "wrH": _f(r.home_winrate8), "wrA": _f(r.away_winrate8),
             "offH": _f(r.home_off_epa8, 1), "offA": _f(r.away_off_epa8, 1),
             "defH": _f(r.home_def_epa8, 1), "defA": _f(r.away_def_epa8, 1),
+            "paH": _f(r.home_pa8, 1), "paA": _f(r.away_pa8, 1),
+            "passAllH": _f(r.home_pass_all8, 0), "passAllA": _f(r.away_pass_all8, 0),
+            "rushAllH": _f(r.home_rush_all8, 0), "rushAllA": _f(r.away_rush_all8, 0),
+            "paRkH": rank_of["pa"].get(r.home_team),
+            "paRkA": rank_of["pa"].get(r.away_team),
+            "rushRkH": rank_of["rushAll"].get(r.home_team),
+            "rushRkA": rank_of["rushAll"].get(r.away_team),
+            "passRkH": rank_of["passAll"].get(r.home_team),
+            "passRkA": rank_of["passAll"].get(r.away_team),
         }
         factors["playersH"] = team_players.get((r.home_team, r.away_team), [])
         factors["playersA"] = team_players.get((r.away_team, r.home_team), [])

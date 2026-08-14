@@ -409,11 +409,23 @@
         " points per game, winning " + Math.round(P("wr") * 100) + "% — " + opp + " " +
         signed(O("pdiff")) + ", winning " + Math.round(O("wr") * 100) + "%.");
     }
-    if (P("off") != null && O("off") != null && P("def") != null) {
-      out.push("<b>Efficiency (EPA per game, last 8):</b> offense " + pk + " " +
-        signed(P("off")) + " vs " + opp + " " + signed(O("off")) +
-        "; defense allowing " + pk + " " + signed(P("def")) + " vs " + opp + " " +
-        signed(O("def")) + " (lower allowed is better).");
+    const ord = n => n == null ? "" :
+      " (" + n + (n % 10 == 1 && n != 11 ? "st" : n % 10 == 2 && n != 12 ? "nd"
+        : n % 10 == 3 && n != 13 ? "rd" : "th") + ")";
+    if (P("pa") != null && O("pa") != null) {
+      out.push("<b>Points allowed (per game, last 8):</b> " + pk + " " +
+        P("pa").toFixed(1) + ord(P("paRk")) + " — " + opp + " " +
+        O("pa").toFixed(1) + ord(O("paRk")) + ".");
+    }
+    if (P("rushAll") != null && O("rushAll") != null) {
+      out.push("<b>Rush yards allowed:</b> " + pk + " " + P("rushAll") +
+        "/gm" + ord(P("rushRk")) + " — " + opp + " " + O("rushAll") +
+        "/gm" + ord(O("rushRk")) + ".");
+    }
+    if (P("passAll") != null && O("passAll") != null) {
+      out.push("<b>Pass yards allowed:</b> " + pk + " " + P("passAll") +
+        "/gm" + ord(P("passRk")) + " — " + opp + " " + O("passAll") +
+        "/gm" + ord(O("passRk")) + ".");
     }
     if (f.qbNameH && f.qbNameA) {
       const better = f.qbValH >= f.qbValA;
@@ -479,13 +491,12 @@
     const a = ats(g);
     if (a) {
       const favSide = g.vegasLine > 0 ? g.home : g.away;
-      const vegasStr = favSide + " −" + Math.abs(g.vegasLine).toFixed(1);
       const mmSide = g.modelMargin > 0 ? g.home : g.away;
-      out.push("<b>Against the spread:</b> Vegas line " + vegasStr +
-        "; the model's expected margin is " + mmSide + " by " +
-        Math.abs(g.modelMargin).toFixed(1) + " &rarr; lean <b>" + a.lineStr +
-        "</b> with a " + pctOf(a.cover) + " cover chance. ATS leans covered 55% " +
-        "over 11 seasons (breakeven 52.4%) — tracked live this season.");
+      out.push("<b>Vegas line:</b> " + favSide + " −" +
+        Math.abs(g.vegasLine).toFixed(1));
+      out.push("<b>Our model:</b> " + mmSide + " by " +
+        Math.abs(g.modelMargin).toFixed(1) + " &rarr; <b>" + a.lineStr +
+        "</b> covers <b>" + pctOf(a.cover) + "</b>");
     }
     return out;
   }
