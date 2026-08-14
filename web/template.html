@@ -569,22 +569,30 @@
       " — proj " + p.v + " " + p.u + veg + vs + "</li>";
   }
 
-  function whyPanel(g) {
+  function keyPlayers(g) {
     const f = g.f || {};
-    let html = '<div class="why"><div class="why-label display">Why ' +
-      teams[pick(g)].name + "</div><ul>" +
-      whyBullets(g).map(b => "<li>" + b + "</li>").join("") + "</ul>";
-    if ((f.playersA || []).length || (f.playersH || []).length) {
-      html += '<div class="why-label display" style="margin-top:12px">Key players &mdash; status &amp; history vs this defense</div>';
-      for (const [code, ps] of [[g.away, f.playersA], [g.home, f.playersH]]) {
-        if ((ps || []).length)
-          html += '<div class="sub" style="margin:4px 0 2px"><b>' + code +
-            "</b></div><ul>" + ps.map(playerLine).join("") + "</ul>";
-      }
-      html += '<div class="sub" style="margin-top:6px">Status: game-week injury reports; ' +
-        "no badge = no report. History is vs this franchise&rsquo;s defense (personnel changes year to year).</div>";
+    if (!(f.playersA || []).length && !(f.playersH || []).length) return "";
+    let html = '<div class="why-label display" style="margin-top:12px">Key players &mdash; status &amp; history vs this defense</div>';
+    for (const [code, ps] of [[g.away, f.playersA], [g.home, f.playersH]]) {
+      if ((ps || []).length)
+        html += '<div class="sub" style="margin:4px 0 2px"><b>' + code +
+          "</b></div><ul>" + ps.map(playerLine).join("") + "</ul>";
     }
-    return html + "</div>";
+    html += '<div class="sub" style="margin-top:6px">Status: game-week injury reports; ' +
+      "no badge = no report. History is vs this franchise&rsquo;s defense (personnel changes year to year).</div>";
+    return html;
+  }
+
+  function inlinePanel(g) {
+    return '<div class="why"><button class="chip all info-open" aria-haspopup="dialog">' +
+      "&#9432; Full analysis &mdash; why " + teams[pick(g)].name + "</button>" +
+      keyPlayers(g) + "</div>";
+  }
+
+  function whyModal(g) {
+    return '<div class="why"><div class="why-label display">Why ' +
+      teams[pick(g)].name + "</div><ul>" +
+      whyBullets(g).map(b => "<li>" + b + "</li>").join("") + "</ul></div>";
   }
 
   function gameRow(g, perspective) {
@@ -622,12 +630,13 @@
       result += ' <span class="badge ' + (hit ? "hit" : "miss") + '">' +
         g.awayScore + "–" + g.homeScore + " " + (hit ? "HIT" : "MISS") + "</span>";
     }
-    return '<div class="game" data-gid="' + gid(g) + '" role="button" tabindex="0"' +
-      ' aria-haspopup="dialog"><div class="when">Wk ' + g.week + "<br>" + fmtDate(g.date) +
+    const open = expanded.has(gid(g));
+    return '<div class="game" data-gid="' + gid(g) + '" role="button" tabindex="0" aria-expanded="' +
+      open + '"><div class="when">Wk ' + g.week + "<br>" + fmtDate(g.date) +
       '</div><div class="who">' + who + result + "</div>" +
       meter(perspective ? p : conf(g), perspective ? isDog : false) +
-      '<div class="pct">' + (starred ? '<span class="star">★</span> ' : "") + pctLabel +
-      '<div class="info">&#9432; details</div></div></div>';
+      '<div class="pct">' + (starred ? '<span class="star">★</span> ' : "") + pctLabel + "</div>" +
+      (open ? inlinePanel(g) : "") + "</div>";
   }
 
   function renderTeam(team) {
@@ -807,7 +816,9 @@
     propsBtn.onclick = () => { view = "props"; selected = null; render(); };
   }
 
-  // Game details open in a modal — one delegated handler for all rows.
+  // Rows expand inline (key players); the analysis bullets open in a modal
+  // via the ⓘ button. One delegated handler for both.
+  const expanded = new Set();
   const gameIndex = {};
   games.forEach(g => { gameIndex[gid(g)] = g; });
 
@@ -818,7 +829,7 @@
       '<button class="modal-close" aria-label="Close">&times;</button>' +
       '<div class="modal-title display">' + g.away + " @ " + g.home +
       " &mdash; Week " + g.week + ", " + fmtDate(g.date) + "</div>" +
-      whyPanel(g) + "</div>";
+      whyModal(g) + "</div>";
     document.body.appendChild(bg);
     const close = () => { bg.remove(); document.removeEventListener("keydown", esc); };
     function esc(e) { if (e.key === "Escape") close(); }
@@ -829,15 +840,22 @@
     bg.querySelector(".modal-close").focus();
   }
 
-  function openGame(e) {
+  function toggleGame(e) {
     const row = e.target.closest(".game[data-gid]");
     if (!row) return;
-    showModal(gameIndex[row.dataset.gid]);
+    if (e.target.closest(".info-open")) {
+      showModal(gameIndex[row.dataset.gid]);
+      return;
+    }
+    if (e.target.closest(".why")) return;
+    const id = row.dataset.gid;
+    expanded.has(id) ? expanded.delete(id) : expanded.add(id);
+    render();
   }
   const mainEl = document.getElementById("main");
-  mainEl.addEventListener("click", openGame);
+  mainEl.addEventListener("click", toggleGame);
   mainEl.addEventListener("keydown", e => {
-    if (e.key === "Enter" || e.key === " ") { e.preventDefault(); openGame(e); }
+    if (e.key === "Enter" || e.key === " ") { e.preventDefault(); toggleGame(e); }
   });
   render();
 </script>
