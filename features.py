@@ -373,6 +373,23 @@ def elo_win_prob(elo_diff: float) -> float:
     return 1.0 / (1.0 + 10.0 ** (-elo_diff / 400.0))
 
 
+def load_depth_qb1() -> dict:
+    """team -> gsis_id of the current official depth-chart QB1 (nflverse
+    mirrors the league feed daily). Authoritative for upcoming games — the
+    last-game starter is wrong after finale rest weeks and injury fill-ins."""
+    try:
+        dc = nfl.load_depth_charts([LAST_SEASON]).to_pandas()
+    except Exception:
+        return {}
+    qb = dc[(dc["pos_abb"] == "QB") & (dc["pos_rank"] == 1)
+            & dc["gsis_id"].notna()].copy()
+    if qb.empty:
+        return {}
+    qb["team"] = qb["team"].map(canon)
+    latest = qb.sort_values("dt").groupby("team").tail(1)
+    return dict(zip(latest["team"], latest["gsis_id"]))
+
+
 def load_clutch_rolling() -> pd.DataFrame:
     """Rolling last-5-min one-score EPA/play per (season, week, team), from
     the build_clutch.py cache. Empty frame (all-NaN features) if absent."""
@@ -432,6 +449,27 @@ def build_features() -> pd.DataFrame:
         for (gid, _), (_, upcoming) in zip(sched, sched[1:]):
             next_opp[(gid, team)] = upcoming
     last_qb: dict[str, str] = {}  # team -> gsis_id of most recent starter
+    starts_hist: dict[str, list] = {}  # team -> starter ids, last 17 games
+    depth_qb1 = load_depth_qb1()
+
+    def expected_qb(team: str):
+        """Expected starter for a FUTURE game: official depth chart first,
+        else the most frequent starter of the last 17 games (ties -> most
+        recent) — never just the last game's starter, which is polluted by
+        finale rest weeks and injury fill-ins."""
+        pid = depth_qb1.get(team)
+        if pid is not None:
+            return pid
+        hist_q = starts_hist.get(team, [])
+        if hist_q:
+            from collections import Counter
+            counts = Counter(hist_q)
+            top = max(counts.values())
+            cands = {p for p, c in counts.items() if c == top}
+            for p in reversed(hist_q):
+                if p in cands:
+                    return p
+        return last_qb.get(team)
     # (name, group) -> recent snap shares (newest last), updated post-game so
     # lookups during feature building only ever see pregame information.
     player_shares: dict[tuple, list] = {}
@@ -632,7 +670,8 @@ def build_features() -> pd.DataFrame:
                 return np.nan
             if pd.notna(qb_id):
                 return float(qb_id != prev)
-            return float(prev in out_ids)
+            exp = expected_qb(team)
+            return float(exp in out_ids) if exp else float(prev in out_ids)
 
         h_qb_changed = qb_changed(home, g.home_qb_id, h_out_ids)
         a_qb_changed = qb_changed(away, g.away_qb_id, a_out_ids)
@@ -653,7 +692,7 @@ def build_features() -> pd.DataFrame:
             return {p["gsis"] for p in players}
 
         def qb_value(team: str, qb_id, out_ids: set) -> tuple:
-            pid = qb_id if pd.notna(qb_id) else last_qb.get(team)
+            pid = qb_id if pd.notna(qb_id) else expected_qb(team)
             if pid is None or (pd.isna(qb_id) and pid in (out_ids | ir_ids(team))):
                 return 0.0, ""
             return rating(pid), player_names.get(pid, "")
@@ -784,8 +823,12 @@ def build_features() -> pd.DataFrame:
                 season_played[away] = season_played.get(away, 0) + 1
             if pd.notna(g.home_qb_id):
                 last_qb[home] = g.home_qb_id
+                starts_hist.setdefault(home, []).append(g.home_qb_id)
+                starts_hist[home] = starts_hist[home][-17:]
             if pd.notna(g.away_qb_id):
                 last_qb[away] = g.away_qb_id
+                starts_hist.setdefault(away, []).append(g.away_qb_id)
+                starts_hist[away] = starts_hist[away][-17:]
             for team in (home, away):
                 for key, share in snaps.get((g.season, g.week, team), []):
                     player_shares.setdefault(key, []).append(share)
