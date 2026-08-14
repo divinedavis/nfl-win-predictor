@@ -153,6 +153,10 @@
     letter-spacing: 0.09em; color: var(--muted);
     margin: 26px 0 10px; padding-bottom: 6px; border-bottom: 1px solid var(--line);
   }
+  h2.sec-toggle { cursor: pointer; user-select: none; }
+  h2.sec-toggle:hover { color: var(--ink); }
+  h2.sec-toggle .caret { color: var(--field); }
+  h2.sec-toggle:focus-visible { outline: 2px solid var(--field); outline-offset: 2px; }
   .games { display: flex; flex-direction: column; gap: 8px; }
   .game {
     display: grid;
@@ -397,6 +401,16 @@
       if (a && a.settled !== null && a.settled !== "push") a.settled ? w++ : l++;
     }
     return w + l ? { w, l } : null;
+  }
+
+  // Collapsible sections — state survives re-renders.
+  const collapsedSecs = new Set();
+  function section(key, title, inner) {
+    const closed = collapsedSecs.has(key);
+    return '<h2 class="section sec-toggle" data-sec="' + key +
+      '" role="button" tabindex="0" aria-expanded="' + !closed + '">' +
+      '<span class="caret">' + (closed ? "&#9656;" : "&#9662;") + "</span> " +
+      title + "</h2>" + (closed ? "" : inner);
   }
 
   function meter(p, isDog) {
@@ -659,8 +673,8 @@
       const hits = done.filter(g => winner(g) === pick(g)).length;
       record = " &mdash; model " + hits + "–" + (done.length - hits) + " so far";
     }
-    html += '<h2 class="section">Full ' + DATA.season + " schedule" + record + "</h2>";
-    html += '<div class="games">' + sched.map(g => gameRow(g, team)).join("") + "</div>";
+    html += section("team-sched", "Full " + DATA.season + " schedule" + record,
+      '<div class="games">' + sched.map(g => gameRow(g, team)).join("") + "</div>");
     html += '<div class="legend"><span><span class="dot" style="background:var(--field)"></span>' + team +
       ' win probability</span><span><span class="dot" style="background:var(--dog)"></span>underdog</span>' +
       "<span>marker at 50%</span><span>click a game for the reasoning</span></div>";
@@ -679,14 +693,14 @@
     const starred = wk.filter(g => conf(g) >= 0.65).sort(byConfDesc);
     const rest = wk.filter(g => conf(g) < 0.65).sort(byConfDesc);
     if (starred.length) {
-      html += '<h2 class="section">&#9733; High confidence &mdash; ' + starred.length +
-        (starred.length === 1 ? " pick" : " picks") + ", 73% correct historically</h2>";
-      html += '<div class="games">' + starred.map(g => gameRow(g, null)).join("") + "</div>";
+      html += section("wk-star", "&#9733; High confidence &mdash; " + starred.length +
+        (starred.length === 1 ? " pick" : " picks") + ", 74% correct historically",
+        '<div class="games">' + starred.map(g => gameRow(g, null)).join("") + "</div>");
     }
     if (rest.length) {
-      html += '<h2 class="section">' +
-        (starred.length ? "Closer calls &mdash; leans, not locks" : "Games") + "</h2>";
-      html += '<div class="games">' + rest.map(g => gameRow(g, null)).join("") + "</div>";
+      html += section("wk-rest",
+        starred.length ? "Closer calls &mdash; leans, not locks" : "Games",
+        '<div class="games">' + rest.map(g => gameRow(g, null)).join("") + "</div>");
     }
     const rec = atsRecord();
     html += '<div class="legend"><span><span class="dot" style="background:var(--field)"></span>pick&rsquo;s win probability</span>' +
@@ -750,8 +764,8 @@
     for (const s of P.stats) {
       const lo = Math.min(...s.players.map(p => p.p10));
       const hi = Math.max(...s.players.map(p => p.p90));
-      html += '<h2 class="section">' + s.label + "</h2>";
-      html += '<div class="games">' + s.players.map(p => propRow(p, lo, hi)).join("") + "</div>";
+      html += section("props-" + s.key, s.label,
+        '<div class="games">' + s.players.map(p => propRow(p, lo, hi)).join("") + "</div>");
     }
     html += '<div class="legend"><span><span class="dot" style="background:var(--field-soft)"></span>80% range (P10&ndash;P90)</span>' +
       '<span><span class="dot" style="background:var(--field);opacity:.45"></span>middle 50%</span>' +
@@ -823,6 +837,13 @@
   }
 
   function toggleGame(e) {
+    const sec = e.target.closest(".sec-toggle");
+    if (sec) {
+      const k = sec.dataset.sec;
+      collapsedSecs.has(k) ? collapsedSecs.delete(k) : collapsedSecs.add(k);
+      render();
+      return;
+    }
     const row = e.target.closest(".game[data-gid]");
     if (!row) return;
     if (e.target.closest(".info-open")) {
