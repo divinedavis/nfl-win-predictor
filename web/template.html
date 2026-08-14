@@ -675,21 +675,6 @@
       '<button id="prevWk"' + (i === 0 ? " disabled" : "") + '>&larr; Wk ' + (i > 0 ? weeks[i - 1] : "") + "</button>" +
       '<span class="wk display">Week ' + week + "</span>" +
       '<button id="nextWk"' + (i === weeks.length - 1 ? " disabled" : "") + '>Wk ' + (i < weeks.length - 1 ? weeks[i + 1] : "") + " &rarr;</button></div>";
-    const bets = wk.map(g => ({ g, a: ats(g) }))
-      .filter(x => x.a && x.a.cover >= 0.60 && !played(x.g))
-      .sort((x, y) => y.a.cover - x.a.cover);
-    if (bets.length) {
-      html += '<div class="hero"><div class="eyebrow">Spread board &mdash; this week&rsquo;s bets</div>' +
-        '<div class="sub">The &ge;60% cover tier covered 58% across an 11-season backtest ' +
-        "(breakeven 52.4%) &mdash; at that rate a &minus;110 bet returns about +$11 " +
-        "per $100 staked on average. Lines and juice move &mdash; confirm at your book.</div>" +
-        '<ul class="betlist">' + bets.map(x =>
-          "<li><b>Bet " + x.a.lineStr + '</b> <span class="ats-hot">' +
-          Math.round(x.a.cover * 100) + "%</span> at " + x.a.oddsStr +
-          '<div class="who2">$100 pays $' + x.a.profit100 + " profit &middot; " +
-          x.g.away + " @ " + x.g.home + " &middot; " + fmtDate(x.g.date) +
-          "</div></li>").join("") + "</ul></div>";
-    }
     const byConfDesc = (a, b) => conf(b) - conf(a);
     const starred = wk.filter(g => conf(g) >= 0.65).sort(byConfDesc);
     const rest = wk.filter(g => conf(g) < 0.65).sort(byConfDesc);
