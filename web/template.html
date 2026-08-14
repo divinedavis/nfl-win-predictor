@@ -208,6 +208,8 @@
   .badge.starred { background: var(--star-soft); color: var(--star); }
   .badge.upset { background: var(--star-soft); color: var(--star); border: 1px solid var(--star); }
 
+  .ats-hot { color: var(--field); font-weight: 700; }
+
   .prop-row {
     display: grid;
     grid-template-columns: minmax(130px, 1.3fr) 76px 1fr 64px;
@@ -496,8 +498,10 @@
     const starred = conf(g) >= 0.65;
     let who, pctLabel;
     const a = ats(g);
+    const pctTxt = "(" + Math.round(a && a.cover * 100) + "%)";
     const atsBit = !a ? "" :
-      " &middot; ATS: " + a.lineStr + " (" + Math.round(a.cover * 100) + "%)" +
+      " &middot; ATS: " + a.lineStr + " " +
+      (a.cover >= 0.60 ? '<span class="ats-hot">' + pctTxt + "</span>" : pctTxt) +
       (a.settled === null ? "" : a.settled === "push" ? " push"
         : a.settled ? " &#10003;" : " &#10007;");
     if (perspective) {
@@ -585,6 +589,7 @@
       '<span class="display">green code = predicted winner</span>' +
       (rec ? "<span>ATS leans this season: <b>" + rec.w + "&ndash;" + rec.l +
         "</b> (" + Math.round(100 * rec.w / (rec.w + rec.l)) + "%)</span>" : "") +
+      '<span><span class="ats-hot">green cover %</span> = confident ATS tier (&ge;60%, covered 58% historically)</span>' +
       '<span>click a game for the reasoning</span></div>';
     return html;
   }
