@@ -20,7 +20,8 @@ import pandas as pd
 import nflreadpy as nfl
 from xgboost import XGBRegressor
 
-from features import LAST_SEASON, canon, load_injury_reports, norm_name
+from features import (LAST_SEASON, canon, load_depth_qb1,
+                      load_injury_reports, norm_name)
 
 FIRST_SEASON = 2006          # modern passing era; enough history for training
 QUANTILES = [0.10, 0.25, 0.50, 0.75, 0.90]
@@ -389,6 +390,7 @@ def project() -> None:
     injuries = load_injury_reports()
     ngs_map = {pid: grp for pid, grp in ngs.groupby("player_id")}
     cur_team = load_current_teams()
+    depth_qb1 = load_depth_qb1()
     season, week = upcoming_week(ctx)
     week_ctx = ctx[(ctx.season == season) & (ctx.week == week)]
     print(f"Projecting {season} week {week} "
@@ -430,6 +432,11 @@ def project() -> None:
             team_now = cur_team.get(r.player_id) if cur_team else r.team
             if team_now is None:
                 continue  # not on any current roster (retired/unsigned)
+            # Only the depth-chart starter projects at QB — a backup with
+            # trailing usage data (Winston-on-NYG case) isn't playing.
+            if (r.position == "QB" and depth_qb1.get(team_now)
+                    not in (None, r.player_id)):
+                continue
             h = d[d.player_id == r.player_id]
             if len(h) < 2:
                 continue
