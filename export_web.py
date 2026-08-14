@@ -152,6 +152,14 @@ def main() -> None:
             season[f"{side}_{g}_out_wt"].fillna(0) for g in POS_GROUPS
         ) + season[f"{side}_ir_wt"].fillna(0)
 
+    # Live spread juice per side (droplet fetch_spread_odds.py); games not in
+    # the snapshot fall back to standard -110 in the page.
+    spread_prices: dict = {}
+    odds_path = Path("spread_odds.csv")
+    if odds_path.exists():
+        for r in pd.read_csv(odds_path).itertuples(index=False):
+            spread_prices.setdefault((r.home, r.away), {})[r.side] = int(r.price)
+
     games = []
     for r in season.sort_values(["week", "gameday"]).itertuples(index=False):
         # Everything the "why this pick" panel cites, keyed H/A. Kept raw —
@@ -195,6 +203,8 @@ def main() -> None:
             "vegasLine": _f(r.spread_line, 1),
             "modelMargin": _f(r.model_margin, 1),
             "coverProb": _f(r.cover_prob, 3),
+            "spH": spread_prices.get((r.home_team, r.away_team), {}).get("home"),
+            "spA": spread_prices.get((r.home_team, r.away_team), {}).get("away"),
             "awayScore": None if pd.isna(r.away_score) else int(r.away_score),
             "homeScore": None if pd.isna(r.home_score) else int(r.home_score),
             "f": factors,

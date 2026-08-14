@@ -10,6 +10,8 @@ LOG=refresh.log
 
 {
   echo "=== refresh $(date -Is) ==="
+  if [ -f .env ]; then set -a; . ./.env; set +a; fi
+  $PY fetch_spread_odds.py || echo "spread odds fetch failed (non-fatal)"
   $PY build_clutch.py --update || echo "clutch refresh failed (non-fatal)"
   $PY features.py
   $PY train.py | tail -4
