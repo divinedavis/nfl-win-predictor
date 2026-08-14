@@ -209,6 +209,16 @@
   .badge.upset { background: var(--star-soft); color: var(--star); border: 1px solid var(--star); }
 
   .ats-hot { color: var(--field); font-weight: 700; }
+  .betlist {
+    margin: 12px 0 0; padding: 0; list-style: none;
+    display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+    gap: 8px;
+  }
+  .betlist li {
+    background: var(--field-soft); border-radius: 8px; padding: 8px 12px;
+    font-variant-numeric: tabular-nums;
+  }
+  .betlist li .who2 { color: var(--muted); font-size: 0.8rem; }
 
   .prop-row {
     display: grid;
@@ -571,6 +581,20 @@
       '<button id="prevWk"' + (i === 0 ? " disabled" : "") + '>&larr; Wk ' + (i > 0 ? weeks[i - 1] : "") + "</button>" +
       '<span class="wk display">Week ' + week + "</span>" +
       '<button id="nextWk"' + (i === weeks.length - 1 ? " disabled" : "") + '>Wk ' + (i < weeks.length - 1 ? weeks[i + 1] : "") + " &rarr;</button></div>";
+    const bets = wk.map(g => ({ g, a: ats(g) }))
+      .filter(x => x.a && x.a.cover >= 0.60 && !played(x.g))
+      .sort((x, y) => y.a.cover - x.a.cover);
+    if (bets.length) {
+      html += '<div class="hero"><div class="eyebrow">Spread board &mdash; this week&rsquo;s bets</div>' +
+        '<div class="matchup">' + bets.length + " green-tier spread bet" + (bets.length > 1 ? "s" : "") + "</div>" +
+        '<div class="sub">The &ge;60% cover tier covered 58% across an 11-season backtest ' +
+        "(breakeven 52.4%). Lines move &mdash; confirm the number at your book.</div>" +
+        '<ul class="betlist">' + bets.map(x =>
+          "<li><b>Bet " + x.a.lineStr + '</b> <span class="ats-hot">' +
+          Math.round(x.a.cover * 100) + '%</span><div class="who2">' +
+          x.g.away + " @ " + x.g.home + " &middot; " + fmtDate(x.g.date) +
+          "</div></li>").join("") + "</ul></div>";
+    }
     const byConfDesc = (a, b) => conf(b) - conf(a);
     const starred = wk.filter(g => conf(g) >= 0.65).sort(byConfDesc);
     const rest = wk.filter(g => conf(g) < 0.65).sort(byConfDesc);
