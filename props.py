@@ -162,6 +162,20 @@ def build_stat_table(ps: pd.DataFrame, ctx: pd.DataFrame, stat: str) -> pd.DataF
     return d[d["y4"].notna() & (d["games_prior"] >= 2)].copy()
 
 
+def load_current_teams() -> dict:
+    """gsis_id -> current team from the official depth-chart feed (all
+    positions, latest snapshot). Projection candidates are keyed to THIS,
+    not their last observed team — otherwise offseason trades misattribute
+    projections and retired players ghost-project under old teams."""
+    try:
+        dc = nfl.load_depth_charts([LAST_SEASON]).to_pandas()
+    except Exception:
+        return {}
+    dc = dc[dc["gsis_id"].notna()].sort_values("dt")
+    latest = dc.groupby("gsis_id").tail(1)
+    return {r.gsis_id: canon(r.team) for r in latest.itertuples(index=False)}
+
+
 def load_ngs() -> pd.DataFrame:
     """Next Gen Stats tracking-derived weekly features (2016+), receiving and
     rushing merged, keyed by (season, week, gsis player id)."""
@@ -374,6 +388,7 @@ def project() -> None:
     ngs = load_ngs()
     injuries = load_injury_reports()
     ngs_map = {pid: grp for pid, grp in ngs.groupby("player_id")}
+    cur_team = load_current_teams()
     season, week = upcoming_week(ctx)
     week_ctx = ctx[(ctx.season == season) & (ctx.week == week)]
     print(f"Projecting {season} week {week} "
@@ -412,13 +427,16 @@ def project() -> None:
         recent = last[last.season >= season - 1]
         allowed_now = current_allowed_map(ps, stat, positions)
         for r in recent.itertuples(index=False):
+            team_now = cur_team.get(r.player_id) if cur_team else r.team
+            if team_now is None:
+                continue  # not on any current roster (retired/unsigned)
             h = d[d.player_id == r.player_id]
             if len(h) < 2:
                 continue
             tail4, tail10 = h.tail(4), h.tail(10)
             if tail4["use"].mean() < min_use:
                 continue
-            game = week_ctx[week_ctx.team == r.team]
+            game = week_ctx[week_ctx.team == team_now]
             if game.empty:
                 continue  # bye week, or player's team not playing
             game = game.iloc[0]
@@ -433,12 +451,12 @@ def project() -> None:
                     return np.nan
                 return float(ngs_tail[col].mean())
 
-            rep = injuries.get((season, week, r.team))
+            rep = injuries.get((season, week, team_now))
             vac = n_out = 0.0
             if rep:
                 for p in rep["out_players"]:
                     if p["group"] in ("wr", "te", "rb"):
-                        vac += last_share.get((r.team, p["norm"]), 0.0)
+                        vac += last_share.get((team_now, p["norm"]), 0.0)
                         n_out += 1
             row = pd.DataFrame([{
                 "y4": tail4["y"].mean(), "y10": tail10["y"].mean(),
@@ -451,7 +469,7 @@ def project() -> None:
                 "opp_def_epa8": game.opp_def_epa8,
                 "opp_allowed8": allowed_now.get(game.opp, np.nan),
                 "week": week,
-                "team_vol8": team_vol_now.get(r.team, np.nan),
+                "team_vol8": team_vol_now.get(team_now, np.nan),
                 "opp_vol_faced8": opp_faced_now.get(game.opp, np.nan),
                 "share_t8": float(np.mean(shares[-8:])) if shares else np.nan,
                 "share_trend": (float(np.mean(shares[-4:]) - np.mean(shares[-8:]))
@@ -467,7 +485,7 @@ def project() -> None:
             out_rows.append({
                 "season": season, "week": week, "stat": stat,
                 "player_id": r.player_id, "player": r.player_display_name,
-                "position": r.position, "team": r.team, "opp": game.opp,
+                "position": r.position, "team": team_now, "opp": game.opp,
                 "is_home": int(game.is_home),
                 "p10": round(q[0], 1), "p25": round(q[1], 1),
                 "p50": round(q[2], 1), "p75": round(q[3], 1),
