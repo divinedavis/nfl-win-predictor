@@ -402,19 +402,8 @@
     const O = k => isHome ? f[k + "A"] : f[k + "H"];
     const out = [];
 
-    if (f.eloProb != null && f.xgb != null) {
-      const eloP = isHome ? f.eloProb : 1 - f.eloProb;
-      const xgbP = isHome ? f.xgb : 1 - f.xgb;
-      out.push("<b>Two models, one number:</b> the Elo power rating gives " + pk + " " +
-        pctOf(eloP) + ", the XGBoost model (form, injuries, rest, weather) gives " +
-        pctOf(xgbP) + " — the pick is a 60/40 blend of the two: <b>" +
-        pctOf(probFor(pk, g)) + "</b>.");
-    }
-    if (f.eloH != null && f.eloA != null) {
-      out.push("<b>Power ratings:</b> " + g.home + " " + f.eloH + " vs " + g.away +
-        " " + f.eloA + ", with a +52 home-field bump to " + g.home +
-        " — the ratings carry each team’s full scoring history, updated every game.");
-    }
+    out.push("<b>Who wins:</b> " + teams[pk].name + " <b>" +
+      pctOf(probFor(pk, g)) + "</b>");
     if (P("pdiff") != null && O("pdiff") != null) {
       out.push("<b>Recent form (last 8 games):</b> " + pk + " " + signed(P("pdiff")) +
         " points per game, winning " + Math.round(P("wr") * 100) + "% — " + opp + " " +
