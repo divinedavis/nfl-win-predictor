@@ -169,6 +169,18 @@ def main() -> None:
     # top rusher, with active status and history vs this week's opponent.
     UNIT = {"passing_yards": "pass yds", "rushing_yards": "rush yds",
             "receiving_yards": "rec yds"}
+
+    # Latest DK player-prop lines (fetch_props.py snapshots); empty until
+    # books post them in game week.
+    from features import norm_name
+    from props import prob_over
+    prop_lines: dict = {}
+    snaps = sorted(Path("props_lines").glob("*.csv"))
+    if snaps:
+        for lr in pd.read_csv(snaps[-1]).itertuples(index=False):
+            if lr.side == "Over" and pd.notna(lr.line):
+                prop_lines[(norm_name(lr.player), lr.stat)] = float(lr.line)
+
     team_players: dict = {}
     proj_path = Path("props_projections.csv")
     if proj_path.exists():
@@ -181,13 +193,20 @@ def main() -> None:
                      ].nlargest(1, "p50")
             keep.append(pd.concat([qb, rec, ru]))
         for r in pd.concat(keep).itertuples(index=False):
-            team_players.setdefault((r.team, r.opp), []).append({
+            entry = {
                 "n": r.player, "pos": r.position, "u": UNIT.get(r.stat, ""),
                 "v": _f(r.p50, 0), "st": (r.status if isinstance(r.status, str)
                                           else "") or "",
                 "vsN": int(r.vs_opp_n or 0), "vsA": _f(r.vs_opp_avg, 1),
                 "car": _f(r.career_avg, 1),
-            })
+            }
+            vl = prop_lines.get((norm_name(r.player), r.stat))
+            if vl is not None:
+                p_over = prob_over([r.p10, r.p25, r.p50, r.p75, r.p90], vl)
+                entry["vl"] = vl
+                entry["lean"] = "Over" if p_over >= 0.5 else "Under"
+                entry["lp"] = _f(max(p_over, 1 - p_over), 2)
+            team_players.setdefault((r.team, r.opp), []).append(entry)
 
     # Current league ranks (1 = fewest allowed) from each team's most recent
     # rolling value — their next game row carries the as-of-now number.

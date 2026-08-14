@@ -513,8 +513,13 @@
         vs += p.vsA > p.car ? " — <b>runs high</b> vs them (career " + p.car + ")"
                             : " — <b>runs low</b> vs them (career " + p.car + ")";
     }
+    let veg = "";
+    if (p.vl != null) {
+      veg = " &middot; Vegas " + p.vl + " &rarr; model <b>" + p.lean +
+        "</b> (" + Math.round(p.lp * 100) + "%)";
+    }
     return "<li><b>" + p.n + "</b> " + p.pos + st +
-      " — proj " + p.v + " " + p.u + vs + "</li>";
+      " — proj " + p.v + " " + p.u + veg + vs + "</li>";
   }
 
   function whyPanel(g) {
