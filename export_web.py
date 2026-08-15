@@ -304,6 +304,9 @@ def main() -> None:
             "impH": _f((r.prob_home_healthy - r.home_prob) * 100, 0),
             "impA": _f((r.home_prob - r.prob_away_healthy) * 100, 0),
             "outStH": _f(r.home_starters_out, 1), "outStA": _f(r.away_starters_out, 1),
+            # Starting offensive linemen out (display only — the threshold was
+            # ablation-tested and did not improve the model; see ol_ablation.py)
+            "olH": _f(r.home_ol_starters_out, 1), "olA": _f(r.away_ol_starters_out, 1),
             "pdiffH": _f(r.home_pdiff8, 1), "pdiffA": _f(r.away_pdiff8, 1),
             "wrH": _f(r.home_winrate8), "wrA": _f(r.away_winrate8),
             "offH": _f(r.home_off_epa8, 1), "offA": _f(r.away_off_epa8, 1),

@@ -519,6 +519,17 @@
         if (key) inj += " Key " + side + " absences: " + key +
           " — numbers are the player’s EPA-per-game rating, so a star out weighs more than a backup.";
       out.push(inj + qbNote);
+      // Linemen have no stat line, so they never make the key-absence list —
+      // but a patched-together line is the injury people ask about first.
+      const lines = [[g.home, f.olH], [g.away, f.olA]].filter(([, n]) => n >= 2);
+      if (lines.length) out.push("<b>Offensive line:</b> " +
+        lines.map(([side, n]) => side + " is down " + Math.floor(n) +
+          " starting linemen").join(", ") +
+        ". Teams in this spot since 2013 have scored 21.6 points a game and won 44% —" +
+        " but nearly all of that is which teams get hurt, not the injury itself:" +
+        " measured against their own recent form they score and protect the quarterback" +
+        " about as well as usual, so the model does not add a penalty beyond the" +
+        " snap-share weighting already in the injury line above.");
       for (const [side, imp, healthy] of [[g.home, f.impH, f.impH + Math.round(g.homeProb * 100)],
                                           [g.away, f.impA, f.impA + Math.round((1 - g.homeProb) * 100)]])
         if (imp >= 1) out.push("<b>Injury cost:</b> " + side + " would be " + healthy +

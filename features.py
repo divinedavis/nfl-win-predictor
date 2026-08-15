@@ -63,6 +63,15 @@ QUESTIONABLE_WEIGHT = 0.37
 # many weeks his loss is already baked into the team's recent form and Elo.
 IR_RECENT_WEEKS = 5
 
+# Offensive line: no public per-player stats exist, so linemen carry no rating
+# and the snap-weighted {side}_ol_out_wt treats five half-starters the same as
+# two full ones. A line's cohesion is not linear in bodies — losing a second
+# starter forces a backup AND shuffles the survivors' assignments — so count
+# STARTERS specifically (recent snap share at or above OL_STARTER_SHARE) and
+# flag the multi-out threshold separately.
+OL_STARTER_SHARE = 0.6
+OL_MULTI_OUT = 2.0  # starters out at which a line is considered patched-together
+
 # Stadium coordinates for predict-time weather forecasts (outdoor games only).
 STADIUMS = {
     "ARI": (33.5276, -112.2626), "ATL": (33.7550, -84.4010),
@@ -486,6 +495,19 @@ def build_features() -> pd.DataFrame:
     player_group: dict[str, str] = {}
     player_last_seen: dict[str, tuple] = {}  # pid -> (season, week)
 
+    # (name, group) -> (season, week) last played, from snap counts. Linemen
+    # produce no stat lines, so player_last_seen never holds them and their IR
+    # recency has to come from playing time instead.
+    snap_last_seen: dict[tuple, tuple] = {}
+
+    def snap_seen_recently(norm: str, group: str, season: int, week: int) -> bool:
+        last = snap_last_seen.get((norm, group))
+        if last is None:
+            return False
+        if last[0] == season:
+            return week - last[1] <= IR_RECENT_WEEKS
+        return last[0] == season - 1 and week <= IR_RECENT_WEEKS
+
     def seen_recently(pid, season: int, week: int) -> bool:
         """Was this player on the field recently enough that his IR absence
         is still news rather than old form the ratings already absorbed?"""
@@ -514,6 +536,46 @@ def build_features() -> pd.DataFrame:
                 wtd[p["group"]] += (float(np.mean(shares[-4:])) if shares
                                     else DEFAULT_SNAP_SHARE)
         return wtd
+
+    def is_ol_starter(p: dict) -> bool:
+        """Was this lineman a starter in his recent games? Linemen have no
+        stat line, so playing time is the only public evidence of a starting
+        job — and a starter is exactly the man whose replacement hurts."""
+        shares = player_shares.get((p["norm"], "ol"))
+        return bool(shares) and float(np.mean(shares[-4:])) >= OL_STARTER_SHARE
+
+    def ol_starters_out(team: str, season: int, week: int) -> tuple:
+        """(starters out, multi-out flag) for a team's offensive line.
+        Out/Doubtful count in full, Questionable at the measured sit rate, and
+        recently-lost IR linemen in full — the same accounting as every other
+        group, but by bodies rather than value, since linemen have no ratings.
+        NaN before snap counts exist, when starters can't be identified."""
+        if season < SNAPS_FIRST_SEASON:
+            return np.nan, np.nan
+        rep = injuries.get((season, week, team))
+        n = 0.0
+        counted = set()
+        if rep:
+            for p in rep["out_players"]:
+                if p["group"] == "ol" and is_ol_starter(p):
+                    n += 1.0
+                    counted.add(p["norm"])
+            for p in rep.get("quest_players", []):
+                if (p["group"] == "ol" and p["norm"] not in counted
+                        and is_ol_starter(p)):
+                    n += QUESTIONABLE_WEIGHT
+                    counted.add(p["norm"])
+        ir_players = ir_index.get((season, week, team))
+        if ir_players is None:
+            latest = ir_latest.get((season, team))
+            ir_players = latest[1] if latest else []
+        for p in ir_players:
+            if (p["group"] == "ol" and p["norm"] not in counted
+                    and snap_seen_recently(p["norm"], "ol", season, week)
+                    and is_ol_starter(p)):
+                n += 1.0
+                counted.add(p["norm"])
+        return n, float(n >= OL_MULTI_OUT)
 
     def player_value(p: dict) -> float:
         """A player's effective value: rating, floored by snap share for
@@ -687,6 +749,8 @@ def build_features() -> pd.DataFrame:
         a_wtd = weighted_outs(away, g.season, g.week)
         h_out_val, h_key_outs, h_ir_wt = out_value_and_names(home, g.season, g.week)
         a_out_val, a_key_outs, a_ir_wt = out_value_and_names(away, g.season, g.week)
+        h_ol_n, h_ol_multi = ol_starters_out(home, g.season, g.week)
+        a_ol_n, a_ol_multi = ol_starters_out(away, g.season, g.week)
 
         # Individual QB rating for the expected starter: the schedule's actual
         # starter when known (announced pregame), otherwise the incumbent —
@@ -746,6 +810,11 @@ def build_features() -> pd.DataFrame:
             **{f"away_{grp}_out_epa": a_out_val[grp] for grp in OFF_GROUPS},
             **{f"home_{grp}_out_val": h_out_val[grp] for grp in DEF_GROUPS},
             **{f"away_{grp}_out_val": a_out_val[grp] for grp in DEF_GROUPS},
+            # --- offensive line (candidate features, ablation-tested) ---
+            "home_ol_starters_out": h_ol_n, "away_ol_starters_out": a_ol_n,
+            "home_ol_multi_out": h_ol_multi, "away_ol_multi_out": a_ol_multi,
+            "ol_starters_out_diff": h_ol_n - a_ol_n,
+            "ol_multi_out_diff": h_ol_multi - a_ol_multi,
             "home_qb_val": h_qb_val, "away_qb_val": a_qb_val,
             "qb_val_diff": h_qb_val - a_qb_val,
             "home_qb_pred_name": h_qb_name, "away_qb_pred_name": a_qb_name,
@@ -850,6 +919,7 @@ def build_features() -> pd.DataFrame:
             for team in (home, away):
                 for key, share in snaps.get((g.season, g.week, team), []):
                     player_shares.setdefault(key, []).append(share)
+                    snap_last_seen[key] = (g.season, g.week)
                 for pid, name, grp, value_game in player_values.get(
                         (g.season, g.week, team), []):
                     val_hist.setdefault(pid, []).append(value_game)
@@ -920,6 +990,9 @@ CANDIDATE_GROUPS = {
     "situational": ["home_letdown", "away_letdown",
                     "home_lookahead", "away_lookahead",
                     "home_low_stakes", "away_low_stakes"],
+    "oline": ["home_ol_starters_out", "away_ol_starters_out",
+              "home_ol_multi_out", "away_ol_multi_out",
+              "ol_starters_out_diff", "ol_multi_out_diff"],
 }
 
 

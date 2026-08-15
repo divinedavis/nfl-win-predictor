@@ -60,6 +60,9 @@ VOL_FEATS = ["team_vol8", "opp_vol_faced8", "share_t8", "share_trend"]
 NGS_FEATS = ["ngs_sep4", "ngs_air_share4", "ngs_xyac_gap4", "ngs_catch4",
              "ngs_ryoe4"]
 VAC_FEATS = ["vacated_share", "n_out_skill"]
+# Candidate block, gated by ol_ablation.py: starting linemen out and the >=2
+# threshold, from the team model's features. Not in FEATS_V2 until it earns it.
+OL_FEATS = ["ol_out", "ol_multi"]
 FEATS_V2 = FEATS + VOL_FEATS + NGS_FEATS + VAC_FEATS
 
 # team volume pool feeding each stat's opportunities
@@ -102,12 +105,16 @@ def game_context() -> pd.DataFrame:
                      "team_elo_prob": r.elo_prob,
                      "team_off_epa8": r.home_off_epa8,
                      "opp_def_epa8": r.away_def_epa8,
+                     "ol_out": r.home_ol_starters_out,
+                     "ol_multi": r.home_ol_multi_out,
                      "gameday": r.gameday, "played": pd.notna(r.home_score)})
         rows.append({"season": r.season, "week": r.week, "team": r.away_team,
                      "opp": r.home_team, "is_home": 0, "is_dome": r.is_dome,
                      "team_elo_prob": 1 - r.elo_prob,
                      "team_off_epa8": r.away_off_epa8,
                      "opp_def_epa8": r.home_def_epa8,
+                     "ol_out": r.away_ol_starters_out,
+                     "ol_multi": r.away_ol_multi_out,
                      "gameday": r.gameday, "played": pd.notna(r.home_score)})
     return pd.DataFrame(rows)
 

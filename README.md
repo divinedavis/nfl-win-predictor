@@ -82,6 +82,37 @@ and the week record.
   `0.4 * xgboost + 0.6 * elo` (blend weight swept in backtest — it beats
   either component on calibration).
 
+## Hypothesis scoreboard
+
+Every idea gets the same treatment: build the feature, run the walk-forward
+backtest, promote only on a Brier improvement across a clear majority of
+seasons. What has been tested so far —
+
+| Hypothesis | Script | Verdict |
+|------------|--------|---------|
+| Finishing / clutch (late one-score EPA) | `clutch_ablation.py` | **Promoted** — Brier better in 11/11 seasons |
+| Kicker quality (distance-adjusted FGOE) | `kicker_ablation.py` | Real skill (split-half r=+0.55), no model gain — Elo absorbs it |
+| Coaching + head-to-head matchup history | `coach_ablation.py` | Nothing beyond Elo; residual r=−0.17 |
+| Upset indicators (luck, sacks, blitz, travel, letdown) | `backtest_groups.py` | None promoted; two kept as display flags |
+| **2+ starting offensive linemen out** | `ol_ablation.py` | Real in raw numbers, already priced — see below |
+
+The pattern: a feature wins only when it carries information Elo and rolling
+EPA could not already have absorbed through game results.
+
+### Offensive line injuries
+
+Teams missing two or more starting linemen score 21.6 points a game and win
+44%, versus 23.4 and 52% for teams with a whole line. Nearly all of that gap
+is *which* teams get hurt, not the injury — measured against a team's own
+last-8-game form, the same teams score +0.16 points (z +0.51) and allow +0.06
+percentage points of sack rate (z +0.38). QB, RB and WR production versus each
+player's own trailing-4 form moves less than a yard in every direction, and
+props pinball loss is flat to worse. `features.py` builds
+`{side}_ol_starters_out` and `{side}_ol_multi_out` (the ≥2 threshold) as a
+candidate group; neither is in `FEATURES`. The dashboard names a patched-up
+line as context, because linemen have no stat line and so never appear in the
+key-absence list.
+
 ## Backtest (walk-forward, 2015–2025, 3,018 games)
 
 Each season predicted by a model trained only on prior seasons.
