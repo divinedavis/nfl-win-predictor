@@ -114,6 +114,16 @@ def props_payload():
             "stats": stats, "paper": paper}
 
 
+def qb_payload():
+    """Quarterback quarter grades, the QBR board and the playoff backtest.
+    None — and the tab stays hidden — until build_qb_splits.py has cached the
+    play-by-play splits."""
+    if not Path("qb_splits.csv").exists():
+        return None
+    from qb_grades import payload as qb_grades_payload
+    return qb_grades_payload()
+
+
 def main() -> None:
     df = pd.read_parquet("features.parquet")
     season = df[(df.season == LAST_SEASON) & (df.game_type == "REG")].copy()
@@ -376,11 +386,17 @@ def main() -> None:
                   for abbr, (name, div) in TEAMS.items()},
         "games": games,
         "props": props_payload(),
+        "qb": qb_payload(),
         "run30": round(league30, 2),
     }
 
     template = Path("web/template.html").read_text()
-    html = template.replace("__DATA_JSON__", json.dumps(data, separators=(",", ":")))
+    # escape the three characters that could close the <script> element early;
+    # player and coach names come from feeds we do not control
+    blob = (json.dumps(data, separators=(",", ":"))
+            .replace("<", "\\u003c").replace(">", "\\u003e")
+            .replace("&", "\\u0026"))
+    html = template.replace("__DATA_JSON__", blob)
     Path("web/index.html").write_text(html)
     print(f"Wrote web/index.html ({len(games)} games, generated {data['generated']})")
 

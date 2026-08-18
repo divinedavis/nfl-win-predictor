@@ -21,6 +21,9 @@ LOG=refresh.log
     $PY paper_trade.py --settle || true
   fi
   $PY build_clutch.py --update || echo "clutch refresh failed (non-fatal)"
+  # quarterback splits: only the current season is re-pulled, history is static
+  $PY build_qb_splits.py --update || echo "qb splits refresh failed (non-fatal)"
+  $PY build_qbr.py || echo "espn qbr refresh failed (non-fatal)"
   $PY features.py
   $PY train.py | tail -4
   $PY props.py || echo "props projection failed (non-fatal)"

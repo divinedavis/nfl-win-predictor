@@ -20,6 +20,9 @@ python3.12 -m venv .venv          # needs Homebrew python3.12+ (system 3.9 is to
 .venv/bin/python predict.py --season 2026 --week 5
 .venv/bin/python position_impact.py  # which position's injuries move win prob
 .venv/bin/python export_web.py    # rebuild web/index.html for the web app
+.venv/bin/python build_qb_splits.py  # per-quarter QB dropback splits (cached CSV)
+.venv/bin/python build_qbr.py        # ESPN Total QBR, week + season level
+.venv/bin/python qb_grades.py        # the quarter/late-game/playoff report
 ```
 
 ## Individual player ratings
@@ -81,6 +84,40 @@ and the week record.
 - **Model**: XGBoost classifier on the above; final probability is
   `0.4 * xgboost + 0.6 * elo` (blend weight swept in backtest — it beats
   either component on calibration).
+
+## Quarterback grades by quarter
+
+`build_qb_splits.py` aggregates every dropback (passes, sacks, scrambles) from
+play-by-play into per-quarter buckets — Q1–Q4, the last five minutes of the
+fourth or overtime, and that same window with the score inside eight points —
+plus a defense-side copy keyed by the defense faced. `build_qbr.py` caches
+ESPN Total QBR (week and season level) from the nflverse release.
+`qb_grades.py` turns both into the dashboard's **QB grades** tab and prints the
+report standalone.
+
+A grade is EPA per dropback inside the bucket, empirical-Bayes shrunk toward
+the league mean by that bucket's own noise, then scaled to 50 ± 20 against the
+passers shown beside it. Each bucket is scaled on its own, so a 70 in the
+fourth quarter means what a 70 in the first does. League-level questions use
+raw rates and paired tests, never the graded scale.
+
+Findings (2021–2025, qualified starters):
+
+- **Late-game decline is situational, not personal.** Raw fourth-quarter play
+  is +0.025 EPA/dropback against +0.057 in the first three, with completions
+  down 61.6% → 58.3% and interceptions up 1.9% → 2.4%. But compare each of 138
+  starter-seasons against *himself* in one-score situations and the last five
+  minutes come out −0.001 EPA/dropback (p = 0.98). The fourth-quarter dip is
+  trailing teams throwing into defenses playing the clock.
+- **Playoffs are harder, and about half of it is the opponent.** 66 starters
+  with 200+ regular-season and 20+ playoff dropbacks in the same year lose
+  −0.089 EPA/dropback in January (37/66 decline, paired t p = 0.007; sack rate
+  5.5% → 6.2%). The playoff field allowed −0.045 EPA/dropback more than the
+  league in the regular season — roughly half the drop is strength of
+  opponent, not the month.
+- Both sides of the playoff comparison are shrunk at the playoff run's sample
+  size. Grading three games as if they were seventeen manufactures a decline
+  out of arithmetic alone.
 
 ## Hypothesis scoreboard
 

@@ -5,7 +5,7 @@
 <meta property="og:type" content="website">
 <meta property="og:site_name" content="Gridiron Odds">
 <meta property="og:title" content="Gridiron Odds — NFL Win Probabilities">
-<meta property="og:description" content="Weekly NFL picks with calibrated win probabilities, why-this-pick reasoning, player prop projections, and upset watch — from an Elo + XGBoost model. High-confidence picks hit 74% historically.">
+<meta property="og:description" content="Weekly NFL picks with calibrated win probabilities, why-this-pick reasoning, quarterback grades by quarter and under five minutes, ESPN QBR 1–32, player prop projections, and upset watch — from an Elo + XGBoost model. High-confidence picks hit 74% historically.">
 <meta property="og:url" content="https://sputterbets.com/">
 <meta property="og:image" content="https://sputterbets.com/og.jpg">
 <meta property="og:image:width" content="960">
@@ -287,6 +287,76 @@
   @media (prefers-reduced-motion: no-preference) {
     .meter .fill { transition: width 240ms ease; }
   }
+
+  /* ---- quarterback grades tab ---- */
+  .controls { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin: 12px 0; }
+  .controls .lbl {
+    font-size: 0.72rem; font-weight: 600; text-transform: uppercase;
+    letter-spacing: 0.09em; color: var(--muted); margin-right: 2px;
+  }
+  .tablewrap {
+    overflow-x: auto; border: 1px solid var(--line); border-radius: 8px;
+    background: var(--surface);
+  }
+  table.gt { border-collapse: collapse; width: 100%; font-size: 0.88rem; }
+  table.gt th, table.gt td {
+    padding: 7px 10px; text-align: right; white-space: nowrap;
+    border-bottom: 1px solid var(--line);
+  }
+  table.gt th {
+    font-size: 0.68rem; font-weight: 600; text-transform: uppercase;
+    letter-spacing: 0.05em; color: var(--muted); background: var(--surface);
+  }
+  table.gt th.sortable { cursor: pointer; user-select: none; }
+  table.gt th.sortable:hover { color: var(--ink); }
+  table.gt th.name, table.gt td.name {
+    text-align: left; position: sticky; left: 0; background: var(--surface);
+  }
+  table.gt td.name { font-weight: 700; }
+  table.gt td.name .sub { color: var(--muted); font-size: 0.76rem; font-weight: 500; }
+  table.gt tr:last-child td { border-bottom: none; }
+  table.gt td.gcell, table.gt td.num { font-variant-numeric: tabular-nums; }
+  table.gt td.gcell { font-weight: 700; }
+  table.gt td.gcell .pn {
+    display: block; font-size: 0.64rem; font-weight: 500; color: var(--muted);
+  }
+  table.gt td.empty { color: var(--dog); font-weight: 500; }
+  .tiles {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(148px, 1fr));
+    gap: 10px; margin: 12px 0;
+  }
+  .tile {
+    background: var(--surface); border: 1px solid var(--line);
+    border-radius: 8px; padding: 12px 14px;
+  }
+  .tile .big {
+    font-size: 1.5rem; font-weight: 700; font-variant-numeric: tabular-nums;
+    line-height: 1.2;
+  }
+  .tile .cap { font-size: 0.78rem; color: var(--muted); margin-top: 2px; }
+  .note { color: var(--muted); font-size: 0.84rem; margin: 10px 0 0; }
+  .cards {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(215px, 1fr));
+    gap: 10px; margin: 12px 0 0;
+  }
+  .card {
+    background: var(--surface); border: 1px solid var(--line);
+    border-radius: 8px; padding: 12px 14px;
+  }
+  .card .eyebrow {
+    font-size: 0.7rem; font-weight: 600; text-transform: uppercase;
+    letter-spacing: 0.08em; color: var(--field); margin-bottom: 2px;
+  }
+  .card .cap { font-size: 0.76rem; color: var(--muted); margin-bottom: 8px; }
+  .card ol { margin: 0; padding: 0; list-style: none; }
+  .card li {
+    display: flex; justify-content: space-between; gap: 8px;
+    padding: 3px 0; font-size: 0.88rem; border-top: 1px solid var(--line);
+  }
+  .card li:first-child { border-top: none; }
+  .card li .who { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .card li .who em { font-style: normal; color: var(--muted); font-size: 0.8rem; }
+  .card li .val { font-weight: 700; font-variant-numeric: tabular-nums; }
 </style>
 
 <div class="wrap">
@@ -309,7 +379,7 @@
     </div>
     <div class="conf-row">
       <span class="conf-tag"></span>
-      <div class="chips"><button class="chip all" id="allBtn" aria-pressed="true">All games, week by week</button><button class="chip all" id="propsBtn" aria-pressed="false" hidden>Player props</button></div>
+      <div class="chips"><button class="chip all" id="allBtn" aria-pressed="true">All games, week by week</button><button class="chip all" id="qbBtn" aria-pressed="false" hidden>QB grades by quarter</button><button class="chip all" id="propsBtn" aria-pressed="false" hidden>Player props</button></div>
     </div>
   </div>
 
@@ -336,6 +406,13 @@
     juice is 52.4%; above breakeven in 10 of 11 seasons). Season-to-date ATS
     record is tracked live above &mdash; a backtest is evidence, not a
     guarantee, and lines for later weeks post as the season approaches.</p>
+    <p>The <b>QB grades</b> tab splits every dropback by quarter and by the
+    last five minutes, grading each passer against the field on EPA per
+    dropback, alongside ESPN&rsquo;s Total QBR ranked 1&ndash;32 and week by
+    week. It also carries the playoff backtest: five seasons of starters
+    measured against their own regular seasons in January. Sacks and scrambles
+    count as dropbacks; the play count under every grade is the honest limit on
+    how much it can mean.</p>
     <p>Player props are quantile projections (P10&ndash;P90) from each
     player&rsquo;s rolling usage and efficiency, opponent positional defense,
     and game context &mdash; validated walk-forward at 6&ndash;10% better than
@@ -352,7 +429,7 @@
   const games = DATA.games;
   let selected = null;   // team abbr or null = all games
   let curWeek = null;
-  let view = "games";    // "games" | "props"
+  let view = "games";    // "games" | "qb" | "props"
 
   document.getElementById("seasonLabel").textContent = DATA.season;
   document.getElementById("genLabel").textContent = "updated " + DATA.generated;
@@ -784,11 +861,337 @@
     return html;
   }
 
+  // ---- quarterback grades view ----
+  // Grades are EPA per dropback inside each split, shrunk toward the league
+  // mean by that split's noise and scaled to 50 +/- 20 against the passers
+  // shown alongside. League-level questions use raw rates, never the grades.
+  let qbScope = "all", qbEnt = "qbs", qbSort = "ov", qbAsc = false;
+  let poSort = "drop";
+
+  const sgn = (v, nd) => (v >= 0 ? "+" : "−") + Math.abs(v).toFixed(nd);
+
+  function gcell(cell) {
+    if (!cell) return '<td class="empty">&mdash;</td>';
+    const [g, epa, n] = cell;
+    const d = Math.max(-1, Math.min(1, (g - 50) / 25));
+    const a = (Math.abs(d) * 0.5).toFixed(2);
+    const bg = d >= 0 ? "rgba(46,125,70," + a + ")" : "rgba(178,59,49," + a + ")";
+    return '<td class="gcell" style="background:' + bg + '" title="' +
+      sgn(epa, 3) + ' EPA per dropback on ' + n + ' dropbacks">' +
+      g.toFixed(0) + '<span class="pn">' + n + "</span></td>";
+  }
+
+  function qbGradeTable() {
+    const Q = DATA.qb;
+    const rows = (Q[qbEnt][qbScope] || []).slice();
+    const order = Q.order;
+    const bIdx = {};
+    order.forEach((k, i) => { bIdx[k] = i; });
+    const val = (r, key) => key === "ov" ? r.ov
+      : key === "swing" ? (r.swing === undefined ? -999 : r.swing)
+      : key === "db" ? r.db
+      : key === "name" ? r.n
+      : (r.g[bIdx[key]] ? r.g[bIdx[key]][0] : -1);
+    rows.sort((a, b) => {
+      const x = val(a, qbSort), y = val(b, qbSort);
+      const c = typeof x === "string" ? x.localeCompare(y) : x - y;
+      return qbAsc ? c : -c;
+    });
+    const arrow = k => qbSort === k ? (qbAsc ? " &#9650;" : " &#9660;") : "";
+    const th = (k, label, cls) => '<th class="sortable' + (cls ? " " + cls : "") +
+      '" data-qbsort="' + k + '" title="sort">' + label + arrow(k) + "</th>";
+    let head = th("name", qbEnt === "qbs" ? "Passer" : "Team", "name") +
+      th("db", "Dropbacks") + th("ov", "Overall");
+    for (const b of Q.buckets) head += th(b.key, b.label);
+    head += th("swing", "Late swing");
+    const body = rows.map(r => {
+      const sw = r.swing === undefined ? '<td class="empty">&mdash;</td>'
+        : '<td class="num" title="late-game grade minus this ' +
+          (qbEnt === "qbs" ? "passer" : "team") + "&rsquo;s own grade before the fourth quarter\">" +
+          (r.swing >= 0 ? "+" : "−") + Math.abs(r.swing).toFixed(0) + "</td>";
+      return "<tr>" +
+        '<td class="name">' + esc(r.n) +
+        (qbEnt === "qbs" ? '<div class="sub">' + esc(r.t) + " &middot; " + r.games +
+          " games</div>" : '<div class="sub">' + r.games + " games</div>") + "</td>" +
+        '<td class="num">' + r.db + "</td>" +
+        gcell(r.g[bIdx.all]) +
+        Q.buckets.map(b => gcell(r.g[bIdx[b.key]])).join("") +
+        sw + "</tr>";
+    }).join("");
+    return '<div class="tablewrap"><table class="gt"><thead><tr>' + head +
+      "</tr></thead><tbody>" + body + "</tbody></table></div>";
+  }
+
+  function qbLeagueTable() {
+    const L = DATA.qb.league;
+    const head = ["Split", "Dropbacks", "EPA/db", "Success", "Sack", "INT", "Comp"]
+      .map((h, i) => '<th' + (i === 0 ? ' class="name"' : "") + ">" + h + "</th>").join("");
+    const body = L.map(r => "<tr>" +
+      '<td class="name">' + esc(r.label) + "</td>" +
+      '<td class="num">' + r.n.toLocaleString() + "</td>" +
+      '<td class="num">' + sgn(r.epaDb, 3) + "</td>" +
+      '<td class="num">' + r.succ.toFixed(1) + "%</td>" +
+      '<td class="num">' + r.sack.toFixed(1) + "%</td>" +
+      '<td class="num">' + r["int"].toFixed(1) + "%</td>" +
+      '<td class="num">' + r.comp.toFixed(1) + "%</td></tr>").join("");
+    return '<div class="tablewrap"><table class="gt"><thead><tr>' + head +
+      "</tr></thead><tbody>" + body + "</tbody></table></div>";
+  }
+
+  function qbPlayoffTable() {
+    const rows = DATA.qb.playoffs.rows.slice();
+    rows.sort((a, b) => poSort === "drop" ? a.diff - b.diff
+      : poSort === "rise" ? b.diff - a.diff
+      : (b.season - a.season) || (b.postEpa - a.postEpa));
+    const head = ["Passer", "Season", "Reg EPA/db", "Playoff EPA/db", "Change",
+                  "Reg grade", "Playoff grade", "Playoff sack%", "Playoff INT%"]
+      .map((h, i) => '<th' + (i === 0 ? ' class="name"' : "") + ">" + h + "</th>").join("");
+    const body = rows.map(r => {
+      const d = Math.max(-1, Math.min(1, r.diff / 0.4));
+      const bg = d >= 0 ? "rgba(46,125,70," + (d * 0.5).toFixed(2) + ")"
+        : "rgba(178,59,49," + (-d * 0.5).toFixed(2) + ")";
+      return "<tr>" +
+        '<td class="name">' + esc(r.qb) + '<div class="sub">' + esc(r.team) + "</div></td>" +
+        '<td class="num">' + r.season + "</td>" +
+        '<td class="num" title="' + r.regN + ' dropbacks">' + sgn(r.regEpa, 3) + "</td>" +
+        '<td class="num" title="' + r.postN + ' dropbacks">' + sgn(r.postEpa, 3) + "</td>" +
+        '<td class="num" style="background:' + bg + '">' + sgn(r.diff, 3) + "</td>" +
+        '<td class="num">' + r.regG.toFixed(0) + "</td>" +
+        '<td class="num">' + r.postG.toFixed(0) + "</td>" +
+        '<td class="num">' + r.postSack.toFixed(1) + "%</td>" +
+        '<td class="num">' + r.postInt.toFixed(1) + "%</td></tr>";
+    }).join("");
+    return '<div class="tablewrap"><table class="gt"><thead><tr>' + head +
+      "</tr></thead><tbody>" + body + "</tbody></table></div>";
+  }
+
+  const esc = v => String(v).replace(/[&<>"']/g, c =>
+    ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"}[c]));
+
+  function heat(v, mid, span) {
+    const d = Math.max(-1, Math.min(1, (v - mid) / span));
+    const a = (Math.abs(d) * 0.5).toFixed(2);
+    return d >= 0 ? "rgba(46,125,70," + a + ")" : "rgba(178,59,49," + a + ")";
+  }
+
+  function topCard(title, cap, rows) {
+    return '<div class="card"><div class="eyebrow">' + title + "</div>" +
+      '<div class="cap">' + cap + "</div><ol>" +
+      rows.map(r => '<li><span class="who">' + esc(r.n) + " <em>" + esc(r.t) +
+        "</em></span><span class=\"val\">" + r.v + "</span></li>").join("") +
+      "</ol></div>";
+  }
+
+  function qbStandouts() {
+    const Q = DATA.qb;
+    const rows = Q.qbs[qbScope] || [];
+    const bIdx = {};
+    Q.order.forEach((k, i) => { bIdx[k] = i; });
+    const cell = (r, k) => r.g[bIdx[k]];
+    const minN = qbScope === "all" ? 40 : 15;
+    let cards = "";
+    for (const b of Q.buckets) {
+      const top = rows.filter(r => cell(r, b.key) && cell(r, b.key)[2] >= minN)
+        .sort((x, y) => cell(y, b.key)[0] - cell(x, b.key)[0]).slice(0, 5);
+      cards += topCard(b.label, "Top 5 by grade", top.map(r => ({
+        n: r.n, t: r.t, v: cell(r, b.key)[0].toFixed(0)})));
+    }
+    // gets better when it is late: biggest positive late swing
+    const swung = rows.filter(r => r.swing !== undefined &&
+      cell(r, "late") && cell(r, "late")[2] >= minN);
+    cards += topCard("Rises late", "Biggest gain from the first three quarters " +
+      "to under 5:00, in grade points", swung.slice()
+      .sort((x, y) => y.swing - x.swing).slice(0, 5)
+      .map(r => ({n: r.n, t: r.t, v: (r.swing >= 0 ? "+" : "−") +
+        Math.abs(r.swing).toFixed(0)})));
+    cards += topCard("Fades late", "Biggest drop from the first three quarters " +
+      "to under 5:00", swung.slice().sort((x, y) => x.swing - y.swing).slice(0, 5)
+      .map(r => ({n: r.n, t: r.t, v: (r.swing >= 0 ? "+" : "−") +
+        Math.abs(r.swing).toFixed(0)})));
+    // steadiest: smallest spread across the four quarters, starters only
+    const quarters = ["q1", "q2", "q3", "q4"];
+    const steady = rows.filter(r => r.ov >= 50 && quarters.every(k => cell(r, k)))
+      .map(r => {
+        const gs = quarters.map(k => cell(r, k)[0]);
+        return {r, spread: Math.max(...gs) - Math.min(...gs)};
+      }).sort((a, b) => a.spread - b.spread).slice(0, 5);
+    cards += topCard("Same every quarter", "Above-average passers with the " +
+      "smallest gap between their best and worst quarter",
+      steady.map(x => ({n: x.r.n, t: x.r.t, v: x.spread.toFixed(0)})));
+    return '<div class="cards">' + cards + "</div>" +
+      '<p class="note">Cards follow the season picker above and need at least ' +
+      minN + " dropbacks in the split. &ldquo;Rises late&rdquo; and &ldquo;fades " +
+      "late&rdquo; are swings in grade points against the passer&rsquo;s own " +
+      "first three quarters &mdash; over a single season these lists turn over " +
+      "almost completely year to year, which is itself the finding.</p>";
+  }
+
+  function qbrBoard() {
+    const B = DATA.qb.qbr.board[qbScope] || [];
+    const head = ["#", "Passer", "Team", "Total QBR", "Action plays",
+                  "Points added", "EPA grade"]
+      .map((h, i) => '<th' + (i === 1 ? ' class="name"' : "") + ">" + h + "</th>").join("");
+    const body = B.map(r => "<tr>" +
+      '<td class="num">' + r.r + "</td>" +
+      '<td class="name">' + esc(r.n) + "</td>" +
+      '<td class="num">' + esc(r.t) + "</td>" +
+      '<td class="num" style="background:' + heat(r.qbr, 50, 30) + '">' +
+      r.qbr.toFixed(1) + "</td>" +
+      '<td class="num">' + r.plays + "</td>" +
+      '<td class="num">' + (r.pa >= 0 ? "+" : "−") + Math.abs(r.pa).toFixed(1) + "</td>" +
+      '<td class="num">' + (r.g === null ? "&mdash;" : r.g.toFixed(0)) + "</td></tr>").join("");
+    return '<div class="tablewrap"><table class="gt"><thead><tr>' + head +
+      "</tr></thead><tbody>" + body + "</tbody></table></div>";
+  }
+
+  function qbrWeeks() {
+    const Q = DATA.qb.qbr;
+    const season = qbScope === "all" ? Q.weeks[Q.weeks.length - 1] : qbScope;
+    const lines = Q.weekly[season] || [];
+    const lg = Q.league[season] || [];
+    const weeks = lg.map(x => x[0]);
+    const head = '<th class="name">Passer</th><th>Avg</th>' +
+      weeks.map(w => "<th>" + w + "</th>").join("");
+    const lgRow = '<tr><td class="name">League average<div class="sub">all ' +
+      "starters</div></td><td class=\"num\">&mdash;</td>" +
+      lg.map(x => '<td class="num">' + x[1].toFixed(0) + "</td>").join("") + "</tr>";
+    const body = lines.map(l => {
+      const byWeek = {};
+      l.w.forEach(([w, v]) => { byWeek[w] = v; });
+      return "<tr>" + '<td class="name">' + esc(l.n) + '<div class="sub">' + esc(l.t) +
+        "</div></td>" + '<td class="num" style="background:' + heat(l.avg, 50, 30) +
+        '">' + l.avg.toFixed(0) + "</td>" +
+        weeks.map(w => byWeek[w] === undefined ? '<td class="empty">&middot;</td>'
+          : '<td class="num" style="background:' + heat(byWeek[w], 50, 30) + '">' +
+            byWeek[w].toFixed(0) + "</td>").join("") + "</tr>";
+    }).join("");
+    return '<div class="tablewrap"><table class="gt"><thead><tr>' + head +
+      "</tr></thead><tbody>" + lgRow + body + "</tbody></table></div>" +
+      '<p class="note">' + season + " regular season, passers with at least six " +
+      "graded weeks, sorted by their plays-weighted average" +
+      (qbScope === "all" ? " (the season picker&rsquo;s multi-year setting has no " +
+        "week numbers, so this shows " + season + ")" : "") +
+      ". A blank cell is a week missed or one with too little work to rate.</p>";
+  }
+
+  function renderQb() {
+    const Q = DATA.qb;
+    const L = {};
+    Q.league.forEach(r => { L[r.key] = r; });
+    const sw = Q.swing, P = Q.playoffs, T = P.tests.all || {};
+    const q4Gap = L.q4.epaDb - L.early.epaDb;
+    const cl = sw.clutchVsEarlyClose, lt = sw.lateVsEarly;
+    const real = cl.p < 0.05;
+
+    let html = '<div class="hero"><div class="eyebrow">Fourth quarter &amp; ' +
+      'under five minutes &mdash; ' + Q.window[0] + "&ndash;" + Q.window[1] + "</div>" +
+      '<div class="matchup">' + (real
+        ? "Passers really do fall off late"
+        : "The late-game drop is the situation, not the passer") + "</div>" +
+      '<div class="sub">League-wide, quarterback play is worth ' + sgn(L.q4.epaDb, 3) +
+      " EPA per dropback in the fourth quarter against " + sgn(L.early.epaDb, 3) +
+      " in the first three &mdash; a " + Math.abs(q4Gap).toFixed(3) +
+      " drop, with completions falling from " + L.early.comp.toFixed(1) + "% to " +
+      L.q4.comp.toFixed(1) + "% and interceptions rising from " + L.early["int"].toFixed(1) +
+      "% to " + L.q4["int"].toFixed(1) + "%. But most of that is score-chasing: " +
+      "trailing teams throw into defenses playing the clock. Comparing each of " +
+      cl.n + " qualified starter-seasons against himself in one-score situations, " +
+      "the last five minutes come out " + sgn(cl.mean, 3) + " EPA per dropback " +
+      "against everything earlier (" + cl.worse + " of " + cl.n + " worse, p = " +
+      cl.p.toFixed(2) + ") &mdash; " + (real ? "a real gap." : "no measurable gap.") +
+      "</div>" +
+      '<div class="bignum">' + sgn(cl.mean, 3) +
+      ' <small>EPA per dropback, one-score football under 5:00 vs earlier</small></div></div>';
+
+    const scopeChips = Q.scopes.map(sc => '<button class="chip all" data-qbscope="' +
+      sc + '" aria-pressed="' + (qbScope === sc) + '">' +
+      (sc === "all" ? Q.window[0] + "–" + Q.window[1] : sc) + "</button>").join("");
+    const entChips = [["qbs", "Passers"], ["teams", "Teams"]].map(([k, lab]) =>
+      '<button class="chip all" data-qbent="' + k + '" aria-pressed="' +
+      (qbEnt === k) + '">' + lab + "</button>").join("");
+    html += '<div class="controls"><span class="lbl">Show</span>' + entChips +
+      '<span class="lbl">Seasons</span>' + scopeChips + "</div>";
+
+    html += section("qb-grades", "Grades by quarter",
+      qbGradeTable() +
+      '<p class="note">50 is average, 70 is about a standard deviation above the ' +
+      "field, and each column is scaled on its own, so a 70 in the fourth quarter " +
+      "means the same thing as a 70 in the first. Small samples are pulled toward " +
+      "50 on purpose &mdash; the dropback count under each grade says how much to " +
+      "trust it. <b>Late swing</b> is a passer&rsquo;s under-5:00 grade minus his " +
+      "own grade before the fourth quarter: negative means he slips relative to " +
+      "the field when the game is late, and a single season of it is 40-odd " +
+      "dropbacks, which is noise as often as it is a trait. Team rows credit " +
+      "whoever took the snaps.</p>");
+
+    html += section("qb-standouts", "Who is good when", qbStandouts());
+
+    html += section("qb-league", "Every dropback, by split", qbLeagueTable() +
+      '<p class="note">Qualified starters only (' + Q.minSeason +
+      "+ dropbacks in a season), " + Q.window[0] + "&ndash;" + Q.window[1] +
+      ". &ldquo;Under 5:00&rdquo; is the last five minutes of the fourth quarter " +
+      "or overtime; the one-score row holds the score within eight points, which " +
+      "strips out garbage time in both directions. Sacks and scrambles count as " +
+      "dropbacks, so the numbers cover what the quarterback actually did with the snap.</p>");
+
+    if (Q.qbr) {
+      html += section("qbr-board", "Total QBR, 1&ndash;32", qbrBoard() +
+        '<p class="note">ESPN&rsquo;s Total QBR on its own 0&ndash;100 scale, ' +
+        "for passers with " + Q.qbr.minPlays + "+ action plays" +
+        (qbScope === "all" ? " in a season, averaged across " + Q.window[0] +
+          "&ndash;" + Q.window[1] + " and weighted by workload" : "") +
+        ". QBR weights every play by how much the game hung on it and splits " +
+        "credit with the receivers and blockers, so it disagrees with the EPA " +
+        "grade in the last column by design &mdash; where they disagree, the " +
+        "passer either got help or carried the offense.</p>");
+      html += section("qbr-weeks", "Total QBR, week by week", qbrWeeks());
+    }
+
+    const defGap = P.defense.gap;
+    const share = Math.round(100 * Math.min(1, Math.abs(defGap / T.diff)));
+    html += section("qb-playoffs", "Regular season vs playoffs",
+      '<div class="tiles">' +
+      '<div class="tile"><div class="big">' + sgn(T.diff, 3) + '</div>' +
+      '<div class="cap">EPA per dropback, playoffs vs the same passer&rsquo;s ' +
+      "regular season</div></div>" +
+      '<div class="tile"><div class="big">' + T.worse + "/" + T.n + '</div>' +
+      '<div class="cap">starter-seasons that declined in January</div></div>' +
+      '<div class="tile"><div class="big">p = ' + T.p.toFixed(3) + '</div>' +
+      '<div class="cap">paired t-test, each passer his own control</div></div>' +
+      '<div class="tile"><div class="big">' + sgn(defGap, 3) + '</div>' +
+      '<div class="cap">EPA per dropback the playoff field allowed vs the league ' +
+      "&mdash; about " + share + "% of the drop</div></div></div>" +
+      '<div class="controls"><span class="lbl">Sort</span>' +
+      [["drop", "Biggest drops"], ["rise", "Biggest risers"], ["season", "By season"]]
+        .map(([k, lab]) => '<button class="chip all" data-posort="' + k +
+          '" aria-pressed="' + (poSort === k) + '">' + lab + "</button>").join("") +
+      "</div>" + qbPlayoffTable() +
+      '<p class="note">Every starter with ' + Q.minSeason + "+ regular-season and " +
+      Q.minPost + "+ playoff dropbacks in the same year, " + Q.window[0] +
+      "&ndash;" + Q.window[1] + " (" + T.n + " starter-seasons). Sack rate goes " +
+      T.regSack.toFixed(1) + "% &rarr; " + T.postSack.toFixed(1) +
+      "%, interception rate " + T.regInt.toFixed(1) + "% &rarr; " +
+      T.postInt.toFixed(1) + "%. Both grades are shrunk at the playoff run&rsquo;s " +
+      "sample size so the two columns are held to the same confidence &mdash; " +
+      "grading a three-game sample as if it were seventeen would manufacture a " +
+      "decline out of arithmetic alone. The honest read: passers lose ground in " +
+      "January, and roughly " + share + "% of it is explained by facing the best " +
+      "defenses in the league rather than by the month on the calendar. " +
+      (P.tests.q4 ? "The fourth-quarter slice moves " + sgn(P.tests.q4.diff, 3) +
+        " (" + P.tests.q4.worse + " of " + P.tests.q4.n + " declined, p = " +
+        P.tests.q4.p.toFixed(3) + "), and the under-5:00 slice " +
+        (P.tests.late ? sgn(P.tests.late.diff, 3) + " on " + P.tests.late.n +
+          " passers &mdash; too few snaps to call." : "is too thin to call.") : "") +
+      "</p>");
+    return html;
+  }
+
   function render() {
     const main = document.getElementById("main");
     main.innerHTML = view === "props" && DATA.props ? renderProps()
+      : view === "qb" && DATA.qb ? renderQb()
       : selected ? renderTeam(selected) : renderWeek(curWeek);
-    if (view !== "props" && !selected) {
+    if (view === "games" && !selected) {
       const prev = document.getElementById("prevWk"), next = document.getElementById("nextWk");
       if (prev) prev.onclick = () => { curWeek -= 1; render(); };
       if (next) next.onclick = () => { curWeek += 1; render(); };
@@ -797,6 +1200,7 @@
       b.setAttribute("aria-pressed", String(view === "games" && b.dataset.team === selected)));
     document.getElementById("allBtn").setAttribute("aria-pressed", String(view === "games" && selected === null));
     document.getElementById("propsBtn").setAttribute("aria-pressed", String(view === "props"));
+    document.getElementById("qbBtn").setAttribute("aria-pressed", String(view === "qb"));
   }
 
   const byConf = { AFC: [], NFC: [] };
@@ -817,6 +1221,11 @@
       });
   }
   document.getElementById("allBtn").onclick = () => { view = "games"; selected = null; render(); };
+  const qbBtn = document.getElementById("qbBtn");
+  if (DATA.qb) {
+    qbBtn.hidden = false;
+    qbBtn.onclick = () => { view = "qb"; selected = null; render(); };
+  }
   const propsBtn = document.getElementById("propsBtn");
   if (DATA.props) {
     propsBtn.hidden = false;
@@ -848,6 +1257,19 @@
   }
 
   function toggleGame(e) {
+    // QB tab controls: scope, entity, column sort, playoff sort
+    const ctl = e.target.closest("[data-qbscope],[data-qbent],[data-qbsort],[data-posort]");
+    if (ctl) {
+      const d = ctl.dataset;
+      if (d.qbscope) qbScope = d.qbscope;
+      else if (d.qbent) { qbEnt = d.qbent; }
+      else if (d.qbsort) {
+        qbAsc = qbSort === d.qbsort ? !qbAsc : (d.qbsort === "name");
+        qbSort = d.qbsort;
+      } else if (d.posort) poSort = d.posort;
+      render();
+      return;
+    }
     const sec = e.target.closest(".sec-toggle");
     if (sec) {
       const k = sec.dataset.sec;
