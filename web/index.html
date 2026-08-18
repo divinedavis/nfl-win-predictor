@@ -335,6 +335,11 @@
   }
   .tile .cap { font-size: 0.78rem; color: var(--muted); margin-top: 2px; }
   .note { color: var(--muted); font-size: 0.84rem; margin: 10px 0 0; }
+  @media (max-width: 620px) {
+    /* the play counts ride under each grade, so the wide count columns go */
+    table.gt th.hide-sm, table.gt td.hide-sm { display: none; }
+    table.gt th, table.gt td { padding: 6px 7px; }
+  }
   .cards {
     display: grid; grid-template-columns: repeat(auto-fit, minmax(215px, 1fr));
     gap: 10px; margin: 12px 0 0;
@@ -901,9 +906,9 @@
     const th = (k, label, cls) => '<th class="sortable' + (cls ? " " + cls : "") +
       '" data-qbsort="' + k + '" title="sort">' + label + arrow(k) + "</th>";
     let head = th("name", qbEnt === "qbs" ? "Passer" : "Team", "name") +
-      th("db", "Dropbacks") + th("ov", "Overall");
+      th("db", "Dropbacks", "hide-sm") + th("ov", "Overall") +
+      th("swing", "Late swing");
     for (const b of Q.buckets) head += th(b.key, b.label);
-    head += th("swing", "Late swing");
     const body = rows.map(r => {
       const sw = r.swing === undefined ? '<td class="empty">&mdash;</td>'
         : '<td class="num" title="late-game grade minus this ' +
@@ -913,10 +918,9 @@
         '<td class="name">' + esc(r.n) +
         (qbEnt === "qbs" ? '<div class="sub">' + esc(r.t) + " &middot; " + r.games +
           " games</div>" : '<div class="sub">' + r.games + " games</div>") + "</td>" +
-        '<td class="num">' + r.db + "</td>" +
-        gcell(r.g[bIdx.all]) +
-        Q.buckets.map(b => gcell(r.g[bIdx[b.key]])).join("") +
-        sw + "</tr>";
+        '<td class="num hide-sm">' + r.db + "</td>" +
+        gcell(r.g[bIdx.all]) + sw +
+        Q.buckets.map(b => gcell(r.g[bIdx[b.key]])).join("") + "</tr>";
     }).join("");
     return '<div class="tablewrap"><table class="gt"><thead><tr>' + head +
       "</tr></thead><tbody>" + body + "</tbody></table></div>";
@@ -1028,17 +1032,20 @@
 
   function qbrBoard() {
     const B = DATA.qb.qbr.board[qbScope] || [];
+    const cls = ["", ' class="name"', "", "", ' class="hide-sm"',
+                 ' class="hide-sm"', ""];
     const head = ["#", "Passer", "Team", "Total QBR", "Action plays",
                   "Points added", "EPA grade"]
-      .map((h, i) => '<th' + (i === 1 ? ' class="name"' : "") + ">" + h + "</th>").join("");
+      .map((h, i) => "<th" + cls[i] + ">" + h + "</th>").join("");
     const body = B.map(r => "<tr>" +
       '<td class="num">' + r.r + "</td>" +
       '<td class="name">' + esc(r.n) + "</td>" +
       '<td class="num">' + esc(r.t) + "</td>" +
       '<td class="num" style="background:' + heat(r.qbr, 50, 30) + '">' +
       r.qbr.toFixed(1) + "</td>" +
-      '<td class="num">' + r.plays + "</td>" +
-      '<td class="num">' + (r.pa >= 0 ? "+" : "−") + Math.abs(r.pa).toFixed(1) + "</td>" +
+      '<td class="num hide-sm">' + r.plays + "</td>" +
+      '<td class="num hide-sm">' + (r.pa >= 0 ? "+" : "−") +
+      Math.abs(r.pa).toFixed(1) + "</td>" +
       '<td class="num">' + (r.g === null ? "&mdash;" : r.g.toFixed(0)) + "</td></tr>").join("");
     return '<div class="tablewrap"><table class="gt"><thead><tr>' + head +
       "</tr></thead><tbody>" + body + "</tbody></table></div>";
