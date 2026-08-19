@@ -12,6 +12,7 @@ targets, so the same table serves training, backtesting, and weekly predictions.
 """
 
 import math
+import os
 
 import numpy as np
 import pandas as pd
@@ -120,7 +121,16 @@ PLAYOFF_WINS = 9
 ELO_START = 1505.0
 ELO_MEAN = 1505.0
 ELO_K = 20.0
-ELO_HFA = 52.0          # home-field advantage in Elo points
+# Home-field advantage, in Elo points. Was 52 -- the value 538 used and the one
+# this project started with -- until the prediction diary showed the model
+# expecting 1,717 home wins across 3,018 games when there were 1,659, further
+# off than luck accounts for, and biased the same way in six of eleven seasons.
+# Home field is simply worth less than it was: home teams won 59.6% of games in
+# 2018 and 50.0% in 2020. hfa_sweep.py measured every value from 25 to 52 and
+# each one below 52 was better on accuracy, honesty and lean at once; 30 is the
+# best of them and survives being re-run with different random draws. Re-check
+# it when the diary alarm starts leaning again -- it will drift with the league.
+ELO_HFA = float(os.environ.get("ELO_HFA", 30.0))
 ELO_REVERT = 1 / 3      # fraction reverted to the mean each offseason
 ROLL_N = 8              # games in the rolling-form window
 
