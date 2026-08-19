@@ -11,3 +11,6 @@ props_projections.csv
 props_lines_historical/
 kicks.csv
 spread_odds.csv
+world_model*.pkl
+sim_backtest*.csv
+ingame_backtest.csv
