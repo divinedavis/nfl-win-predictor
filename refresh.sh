@@ -30,6 +30,9 @@ LOG=refresh.log
   $PY export_web.py
   if [ -d /var/www/nfl ]; then
     cp web/index.html /var/www/nfl/index.html
+    # Static, but copied every run so an edit in the repo cannot sit
+    # undeployed the way docroot pages have drifted on other projects.
+    cp web/how-it-works.html /var/www/nfl/how-it-works.html
     echo "deployed to /var/www/nfl"
   fi
   echo "=== done $(date -Is) ==="

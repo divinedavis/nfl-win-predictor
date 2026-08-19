@@ -77,6 +77,18 @@
 
   header { padding: 28px 0 18px; border-bottom: 3px solid var(--ink); }
   .masthead { display: flex; align-items: baseline; gap: 14px; flex-wrap: wrap; }
+  .masthead .how {
+    margin-left: auto;
+    font-family: "Avenir Next Condensed", "Arial Narrow", system-ui, sans-serif;
+    font-size: 0.82rem; text-transform: uppercase; letter-spacing: 0.09em;
+    color: var(--muted); text-decoration: none;
+    border: 1px solid var(--line); border-radius: 4px; padding: 5px 11px;
+    white-space: nowrap;
+  }
+  .masthead .how:hover, .masthead .how:focus-visible {
+    color: var(--field); border-color: var(--field);
+  }
+  @media (max-width: 520px) { .masthead .how { margin-left: 0; } }
   h1 {
     margin: 0;
     font-family: "Avenir Next Condensed", "Helvetica Neue Condensed",
@@ -397,6 +409,7 @@
     <div class="masthead">
       <h1>Gridiron Odds <span class="season" id="seasonLabel"></span></h1>
       <span class="tagline display" id="genLabel"></span>
+      <a class="how" href="how-it-works.html">How it works</a>
     </div>
   </header>
 

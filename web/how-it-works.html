@@ -1,0 +1,462 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>How Gridiron Odds Works</title>
+<meta name="description" content="A plain-English walkthrough of how the Gridiron Odds NFL prediction system is built, from free data to a single-file website.">
+<meta property="og:title" content="How Gridiron Odds Works">
+<meta property="og:description" content="Free NFL data in, a 40-second morning rebuild, one HTML file out.">
+<meta property="og:type" content="article">
+<meta property="og:url" content="https://sputterbets.com/how-it-works.html">
+<meta property="og:image" content="https://sputterbets.com/og.jpg">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>&#127944;</text></svg>">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Oswald:wght@400;500;600&family=Source+Sans+3:ital,wght@0,400;0,600;1,400&family=IBM+Plex+Mono:wght@400;500&display=swap">
+
+<style>
+  /* Palette lifted from the dashboard itself (web/template.html) so this page
+     and the product it describes read as one system. */
+  :root {
+    --bg: #F5F4EF;
+    --surface: #FFFFFF;
+    --ink: #1C2734;
+    --muted: #5C6675;
+    --line: #E4E2D9;
+    --rule: #D8D5C9;
+    --field: #2E7D46;
+    --field-soft: #E4F0E7;
+    --star: #A87B1F;
+    --star-soft: #F4EBD7;
+    --alert: #B23B31;
+    --alert-soft: #F6E2DF;
+    --code-bg: #EFEDE5;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #12181F;
+      --surface: #1B232D;
+      --ink: #E8EBEE;
+      --muted: #94A1AD;
+      --line: #2A3541;
+      --rule: #33404E;
+      --field: #4CAB6E;
+      --field-soft: #1C3226;
+      --star: #C9A250;
+      --star-soft: #322A18;
+      --alert: #D96054;
+      --alert-soft: #35201E;
+      --code-bg: #141C25;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #12181F;
+    --surface: #1B232D;
+    --ink: #E8EBEE;
+    --muted: #94A1AD;
+    --line: #2A3541;
+    --rule: #33404E;
+    --field: #4CAB6E;
+    --field-soft: #1C3226;
+    --star: #C9A250;
+    --star-soft: #322A18;
+    --alert: #D96054;
+    --alert-soft: #35201E;
+    --code-bg: #141C25;
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--ink);
+    font-family: "Source Sans 3", ui-sans-serif, system-ui, sans-serif;
+    font-size: 17px;
+    line-height: 1.62;
+    -webkit-font-smoothing: antialiased;
+  }
+  .wrap { max-width: 760px; margin: 0 auto; padding: 56px 22px 100px; }
+
+  /* ---- type scale ---- */
+  h1, h2, h3, .kicker, .step-n, .chip, th {
+    font-family: Oswald, "Avenir Next Condensed", "Arial Narrow", sans-serif;
+  }
+  h1 {
+    font-size: clamp(2.3rem, 7vw, 3.4rem);
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.012em;
+    line-height: 1.02;
+    margin: 0 0 14px;
+    text-wrap: balance;
+  }
+  h1 .accent { color: var(--field); }
+  h2 {
+    font-size: 1.42rem;
+    font-weight: 500;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    margin: 0 0 4px;
+    text-wrap: balance;
+  }
+  h3 {
+    font-size: 1.02rem; font-weight: 500; text-transform: uppercase;
+    letter-spacing: 0.07em; margin: 0 0 6px; color: var(--ink);
+  }
+  p { margin: 0 0 14px; }
+  a { color: var(--field); }
+  strong { font-weight: 600; }
+
+  .kicker {
+    font-size: 0.76rem; text-transform: uppercase; letter-spacing: 0.18em;
+    color: var(--muted); margin: 0 0 10px;
+  }
+  .lede {
+    font-size: 1.18rem; line-height: 1.5; color: var(--ink);
+    border-left: 3px solid var(--field); padding-left: 18px; margin: 0 0 8px;
+  }
+  .sub { color: var(--muted); font-size: 0.94rem; }
+
+  section { margin-top: 52px; }
+  section > h2 + .sub { margin: 0 0 22px; }
+  .divider { height: 1px; background: var(--rule); border: 0; margin: 0; }
+
+  code, .mono {
+    font-family: "IBM Plex Mono", ui-monospace, monospace;
+    font-size: 0.87em;
+  }
+  code { background: var(--code-bg); padding: 1px 5px; border-radius: 3px; }
+
+  /* ---- the pipeline, the page's thesis ---- */
+  .flow {
+    display: grid; gap: 12px; margin: 26px 0 8px;
+    grid-template-columns: 1fr;
+  }
+  @media (min-width: 620px) { .flow { grid-template-columns: 1fr 1fr 1fr; } }
+  .node {
+    background: var(--surface); border: 1px solid var(--line);
+    border-top: 3px solid var(--rule);
+    padding: 14px 16px 16px; position: relative;
+  }
+  .node.out { border-top-color: var(--field); }
+  .node .n {
+    font-family: "IBM Plex Mono", monospace; font-size: 0.7rem;
+    letter-spacing: 0.1em; text-transform: uppercase; color: var(--muted);
+    display: block; margin-bottom: 6px;
+  }
+  .node b { display: block; font-size: 1.04rem; margin-bottom: 3px; }
+  .node span.d { font-size: 0.88rem; color: var(--muted); line-height: 1.45; }
+
+  /* ---- numbered sequence: the daily job genuinely is ordered ---- */
+  ol.steps { list-style: none; margin: 18px 0 0; padding: 0; }
+  ol.steps li {
+    display: grid; grid-template-columns: 2.1rem 1fr; gap: 14px;
+    padding: 10px 0; border-top: 1px solid var(--line); align-items: baseline;
+  }
+  ol.steps li:first-child { border-top: 0; }
+  .step-n {
+    font-size: 0.92rem; color: var(--field); font-weight: 500;
+    font-variant-numeric: tabular-nums;
+  }
+  ol.steps .what { font-family: "IBM Plex Mono", monospace; font-size: 0.83rem; }
+  ol.steps .why { color: var(--muted); font-size: 0.93rem; display: block; }
+  li.hot .what { color: var(--field); font-weight: 500; }
+
+  /* ---- unordered set: sources are a set, not a sequence ---- */
+  .cards { display: grid; gap: 12px; margin-top: 18px; }
+  @media (min-width: 560px) { .cards { grid-template-columns: 1fr 1fr; } }
+  .card {
+    background: var(--surface); border: 1px solid var(--line);
+    padding: 14px 16px;
+  }
+  .card b { display: block; font-size: 1rem; }
+  .card .d { color: var(--muted); font-size: 0.92rem; }
+  .tag {
+    display: inline-block; font-size: 0.68rem; text-transform: uppercase;
+    letter-spacing: 0.12em; padding: 2px 7px; margin-top: 8px;
+    font-family: Oswald, sans-serif;
+  }
+  .tag.free { background: var(--field-soft); color: var(--field); }
+  .tag.paid { background: var(--star-soft); color: var(--star); }
+
+  /* ---- tables ---- */
+  .scroll { overflow-x: auto; margin-top: 18px; }
+  table { border-collapse: collapse; width: 100%; font-size: 0.95rem; }
+  th, td {
+    text-align: left; padding: 9px 12px 9px 0;
+    border-bottom: 1px solid var(--line); vertical-align: top;
+  }
+  th {
+    font-size: 0.74rem; text-transform: uppercase; letter-spacing: 0.11em;
+    color: var(--muted); font-weight: 500; border-bottom-color: var(--rule);
+    white-space: nowrap;
+  }
+  td:first-child { white-space: nowrap; padding-right: 20px; }
+  td.num { font-variant-numeric: tabular-nums; }
+  .new { color: var(--field); font-size: 0.72rem; text-transform: uppercase;
+         letter-spacing: 0.1em; font-family: Oswald, sans-serif; }
+
+  /* ---- verdict chips: real pass/fail state ---- */
+  .chip {
+    display: inline-block; font-size: 0.72rem; text-transform: uppercase;
+    letter-spacing: 0.1em; padding: 3px 9px; white-space: nowrap;
+  }
+  .chip.yes { background: var(--field-soft); color: var(--field); }
+  .chip.no  { background: var(--alert-soft); color: var(--alert); }
+
+  .callout {
+    background: var(--surface); border: 1px solid var(--line);
+    border-left: 3px solid var(--star); padding: 16px 18px; margin-top: 20px;
+  }
+  .callout p:last-child { margin-bottom: 0; }
+
+  pre {
+    background: var(--code-bg); border: 1px solid var(--line);
+    padding: 14px 16px; overflow-x: auto; margin: 18px 0 0;
+    font-family: "IBM Plex Mono", monospace; font-size: 0.83rem; line-height: 1.7;
+  }
+  pre .c { color: var(--muted); }
+
+  footer {
+    margin-top: 64px; padding-top: 20px; border-top: 1px solid var(--rule);
+    color: var(--muted); font-size: 0.88rem;
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <p class="kicker">sputterbets.com &middot; how it is built</p>
+  <h1>Inside <span class="accent">Gridiron Odds</span></h1>
+  <p class="lede">Every morning a computer downloads last night&rsquo;s NFL data,
+  re-learns which teams are good, predicts every upcoming game, and rewrites the
+  entire website as a single file.</p>
+  <p class="sub">No database. No app server. No AI service. About 6,800 lines of
+  Python and one rented Linux machine.</p>
+
+  <div class="flow">
+    <div class="node">
+      <span class="n">in</span>
+      <b>Free NFL data</b>
+      <span class="d">Every play since 1999 &mdash; roughly a million of them &mdash;
+      plus weather and live scores.</span>
+    </div>
+    <div class="node">
+      <span class="n">6:30am daily</span>
+      <b>Rebuild everything</b>
+      <span class="d">Re-rate all 32 teams, retrain the model from scratch,
+      predict every game. Takes 40 seconds.</span>
+    </div>
+    <div class="node out">
+      <span class="n">out</span>
+      <b>One HTML file</b>
+      <span class="d">573&nbsp;KB with the predictions baked inside. That file
+      <em>is</em> the website.</span>
+    </div>
+  </div>
+
+  <section>
+    <h2>Where the numbers come from</h2>
+    <p class="sub">Four sources. Only one of them costs anything.</p>
+    <div class="cards">
+      <div class="card">
+        <b>nflverse</b>
+        <span class="d">A volunteer project publishing every NFL play since 1999
+        &mdash; score, weather, injuries, who was on the field for which snap.
+        This is the foundation of the whole app.</span>
+        <span class="tag free">free &middot; no account</span>
+      </div>
+      <div class="card">
+        <b>ESPN</b>
+        <span class="d">Quarterback ratings, and live scores during games.
+        Its public scoreboard is what powers the live win-probability bar.</span>
+        <span class="tag free">free &middot; no key</span>
+      </div>
+      <div class="card">
+        <b>Open-Meteo</b>
+        <span class="d">Weather forecasts, so an outdoor game in 20&nbsp;mph wind
+        gets predicted differently from one under a roof.</span>
+        <span class="tag free">free &middot; no key</span>
+      </div>
+      <div class="card">
+        <b>The Odds API</b>
+        <span class="d">Betting lines, used as a benchmark to measure against.
+        Pulled only Wednesdays and Sundays to keep the bill down.</span>
+        <span class="tag paid">the only paid one</span>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2>The two brains</h2>
+    <p class="sub">Predictions come from mixing two completely different methods,
+    because each one is wrong in different places.</p>
+
+    <div class="cards">
+      <div class="card">
+        <b>Elo &mdash; 60% of the answer</b>
+        <span class="d">The chess rating system, borrowed for football. Every team
+        carries a number near 1500. Beat someone better than you and your number
+        goes up, theirs goes down. Simple, and stubbornly hard to beat.</span>
+      </div>
+      <div class="card">
+        <b>XGBoost &mdash; 40% of the answer</b>
+        <span class="d">Machine learning that builds thousands of tiny yes/no
+        questions and stacks them. <em>Higher rated? Quarterback playing? Windy?</em>
+        Each is dumb alone; thousands together get smart. It sees ~70 facts
+        per game.</span>
+      </div>
+    </div>
+
+    <div class="callout">
+      <p><strong>Why 60/40?</strong> It was tested, not guessed. Every blend from
+      pure&nbsp;Elo to pure&nbsp;XGBoost was scored against eleven seasons of real
+      results, and 60/40 produced the most honest probabilities &mdash; when it
+      says 70%, that team really does win about 70% of the time.</p>
+      <p class="sub" style="margin-top:10px">Result: right on <strong>65%</strong>
+      of games. The Vegas closing line gets 66%. On the picks it flags as
+      high-confidence, it hits 73%.</p>
+    </div>
+  </section>
+
+  <section>
+    <h2>The 6:30am routine</h2>
+    <p class="sub">A scheduled job (<code>refresh.sh</code>) runs these in order
+    every morning. It runs again Sunday at 11:45am ET to catch injury news that
+    lands just before kickoff.</p>
+    <ol class="steps">
+      <li><span class="step-n">01</span><span><span class="what">fetch_spread_odds.py</span>
+        <span class="why">Grab the current Vegas lines.</span></span></li>
+      <li><span class="step-n">02</span><span><span class="what">build_clutch.py</span>
+        <span class="why">How each team performs in the last five minutes of close games.</span></span></li>
+      <li><span class="step-n">03</span><span><span class="what">build_qb_splits.py</span>
+        <span class="why">Quarterback performance broken out by quarter.</span></span></li>
+      <li><span class="step-n">04</span><span><span class="what">build_qbr.py</span>
+        <span class="why">Pull ESPN&rsquo;s official quarterback ratings.</span></span></li>
+      <li class="hot"><span class="step-n">05</span><span><span class="what">features.py</span>
+        <span class="why">The heart of it. 1,000 lines that turn raw plays into
+        &ldquo;here&rsquo;s how good every team and player is right now.&rdquo;</span></span></li>
+      <li><span class="step-n">06</span><span><span class="what">train.py</span>
+        <span class="why">Re-learn from scratch on everything through last night.</span></span></li>
+      <li><span class="step-n">07</span><span><span class="what">props.py</span>
+        <span class="why">Predict individual player yardage.</span></span></li>
+      <li><span class="step-n">08</span><span><span class="what">export_web.py</span>
+        <span class="why">Write the website.</span></span></li>
+    </ol>
+  </section>
+
+  <section>
+    <h2>The website is one file</h2>
+    <p>This is the unusual part, and it is a deliberate choice. There is no
+    database, no backend, and no application server. The entire site is three
+    files sitting in a folder:</p>
+    <pre>/var/www/nfl/
+  index.html   <span class="c">573 KB &mdash; the whole site, data baked inside</span>
+  live.json      <span class="c">2 B &mdash; live scores, empty between games</span>
+  og.jpg        <span class="c">71 KB &mdash; preview image for texts and social</span></pre>
+    <p style="margin-top:16px"><code>export_web.py</code> takes every prediction,
+    turns it into a block of data, and pastes it <em>inside</em> the HTML. A
+    visitor downloads that one file and their browser draws the charts.</p>
+    <p><strong>Why this is smart:</strong> there is nothing to crash. No database
+    to go down, no server code to break. Serving the site is as reliable as
+    serving a photo, and it loads fast anywhere.</p>
+  </section>
+
+  <section>
+    <h2>Where it lives</h2>
+    <div class="scroll">
+      <table>
+        <tr><td><strong>DigitalOcean droplet</strong></td>
+            <td>A small rented Linux computer with 2&nbsp;GB of memory.</td></tr>
+        <tr><td><strong>nginx</strong></td>
+            <td>The program that hands the file to visitors.</td></tr>
+        <tr><td><strong>Let&rsquo;s Encrypt</strong></td>
+            <td>Free certificate &mdash; the padlock in the address bar. Renews itself.</td></tr>
+        <tr><td><strong>cron</strong></td>
+            <td>The alarm clock that runs the scheduled jobs.</td></tr>
+      </table>
+    </div>
+    <pre><span class="c"># three scheduled jobs</span>
+6:30am  daily     full rebuild
+11:45am Sunday    pre-kickoff refresh
+every 5 min       live scores, 1pm&ndash;midnight ET</pre>
+  </section>
+
+  <section>
+    <h2>The full toolkit</h2>
+    <div class="scroll">
+      <table>
+        <thead><tr><th>Piece</th><th>What it does</th></tr></thead>
+        <tbody>
+          <tr><td><strong>Python</strong></td><td>The language everything is written in.</td></tr>
+          <tr><td><strong>XGBoost</strong></td><td>The machine-learning brain &mdash; thousands of stacked yes/no questions.</td></tr>
+          <tr><td><strong>Elo</strong></td><td>Chess-style team ratings. Carries 60% of every prediction.</td></tr>
+          <tr><td><strong>World model</strong> <span class="new">new</span></td>
+              <td>A fake football game that knows the real rules of thumb &mdash; yards per run on 2nd&nbsp;&amp;&nbsp;7, field-goal odds by distance, clock burned per play. It <em>plays</em> a game 2,000 times instead of guessing once. Learned from 365,000 plays.</td></tr>
+          <tr><td><strong>Live win probability</strong> <span class="new">new</span></td>
+              <td>Restarts that fake game from the current score, down and clock, so the number keeps moving during the game instead of freezing at kickoff.</td></tr>
+          <tr><td><strong>pandas</strong></td><td>Spreadsheets in code &mdash; moves the data around.</td></tr>
+          <tr><td><strong>scikit-learn</strong></td><td>Scores how good the predictions actually are.</td></tr>
+          <tr><td><strong>nflreadpy</strong></td><td>Downloads the free NFL data.</td></tr>
+          <tr><td><strong>pyarrow</strong></td><td>Fast file format for the big data table.</td></tr>
+          <tr><td><strong>nginx</strong></td><td>Serves the website.</td></tr>
+          <tr><td><strong>cron &amp; launchd</strong></td><td>Alarm clocks &mdash; one on the server, one on the Mac.</td></tr>
+          <tr><td><strong>DigitalOcean</strong></td><td>The rented computer.</td></tr>
+          <tr><td><strong>Let&rsquo;s Encrypt</strong></td><td>The padlock.</td></tr>
+          <tr><td><strong>GitHub</strong></td><td>Backup, plus a record of every change ever made.</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="sub" style="margin-top:16px">Notably absent: no React, no database,
+    no cloud platform, no AI API. The world model is decision trees and lookup
+    tables &mdash; it is not a language model and makes no API calls, so it costs
+    nothing per run.</p>
+  </section>
+
+  <section>
+    <h2>What the world model was tested on</h2>
+    <p class="sub">Five ideas, each measured against real games the model had
+    never seen. Four failed. Failing them on purpose is what keeps the site
+    honest.</p>
+    <div class="scroll">
+      <table>
+        <thead><tr><th>Idea</th><th>Result</th><th>Verdict</th></tr></thead>
+        <tbody>
+          <tr><td>Better pregame picks</td>
+              <td class="num">Gain too small to be real</td>
+              <td><span class="chip no">no</span></td></tr>
+          <tr><td>Better spread picks</td>
+              <td class="num">53% vs the current 55%</td>
+              <td><span class="chip no">no</span></td></tr>
+          <tr><td>Better spread uncertainty</td>
+              <td class="num">Measurably worse</td>
+              <td><span class="chip no">no</span></td></tr>
+          <tr><td>Explaining injuries</td>
+              <td class="num">Overstates by 3&ndash;6&times;</td>
+              <td><span class="chip no">no</span></td></tr>
+          <tr><td><strong>Live win probability</strong></td>
+              <td class="num">Ties the best free version <em>that peeks at the betting line</em></td>
+              <td><span class="chip yes">shipped</span></td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="callout">
+      <p><strong>Why most of it failed.</strong> Elo is built from final scores
+      &mdash; and final scores are just what all those drives added up to. So
+      simulating the drives underneath told Elo almost nothing it had not already
+      learned. The one place it wins is <em>during</em> a game, because a pregame
+      prediction has nothing to say about 3rd&nbsp;and&nbsp;7 with two minutes
+      left.</p>
+    </div>
+  </section>
+
+  <footer>
+    <p><a href="index.html">&larr; Back to the picks</a> &middot; Gridiron Odds.
+    Predictions are a model&rsquo;s opinion, not advice.</p>
+  </footer>
+
+</div>
+</body>
+</html>
