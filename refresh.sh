@@ -27,6 +27,10 @@ LOG=refresh.log
   $PY features.py
   $PY train.py | tail -4
   $PY props.py || echo "props projection failed (non-fatal)"
+  # Write down what the model thinks today and score anything that has been
+  # played since, so there is a permanent record to learn from later.
+  $PY diary.py --settle --record || echo "diary update failed (non-fatal)"
+  $PY diary.py --report | tail -12 || true
   $PY export_web.py
   if [ -d /var/www/nfl ]; then
     cp web/index.html /var/www/nfl/index.html
