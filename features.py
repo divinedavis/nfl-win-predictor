@@ -963,15 +963,35 @@ def build_features() -> pd.DataFrame:
     return df
 
 
+# Twenty columns were removed on 2026-08-19 after ablate.py rebuilt the model
+# without each group and measured the result over seven random draws. All three
+# removals improve the model; together they take the Brier from .21689 to
+# .21631, about four times its own wobble, and accuracy from 65.19% to 65.37%.
+# The columns are still built and still in the parquet -- the dashboard shows
+# weather and counts out in its panels -- they are just no longer fed to the
+# model.
+#
+#   temp / wind          Weather did nothing overall, and was actively WORSE in
+#                        the 328 games with 15mph+ wind or sub-32F where it
+#                        should matter most (.21217 without vs .21279 with).
+#                        Open-Meteo is still pulled for display.
+#   n_out / n_quest      Plain headcounts of who is missing. Redundant once the
+#                        model knows how good the missing players are, which the
+#                        out_epa / out_val columns tell it and which is one of
+#                        the strongest groups in the model.
+#   {grp}_out_wt         Same redundancy, sixteen times over. Knowing "1.0
+#                        receivers are out" adds nothing on top of knowing which
+#                        receiver, and gives the model more places to find
+#                        patterns that are not there.
+#
+# The two offensive-line columns SURVIVE: linemen have no public per-player
+# stats, so snap weight is the only injury signal they have.
 FEATURES = [
     "elo_diff", "elo_home", "elo_away", "elo_prob",
     "home_rest", "away_rest", "rest_diff",
     "div_game", "is_dome", "week",
-    "temp", "wind",
-    "home_n_out", "away_n_out", "home_n_quest", "away_n_quest",
     "home_qb_changed", "away_qb_changed",
-    *[f"home_{grp}_out_wt" for grp in POS_GROUPS],
-    *[f"away_{grp}_out_wt" for grp in POS_GROUPS],
+    "home_ol_out_wt", "away_ol_out_wt",
     *[f"home_{grp}_out_epa" for grp in OFF_GROUPS],
     *[f"away_{grp}_out_epa" for grp in OFF_GROUPS],
     *[f"home_{grp}_out_val" for grp in DEF_GROUPS],
