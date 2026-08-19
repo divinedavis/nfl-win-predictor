@@ -14,3 +14,6 @@ spread_odds.csv
 world_model*.pkl
 sim_backtest*.csv
 ingame_backtest.csv
+sim_margins*.npz
+retrain.log
+live.log

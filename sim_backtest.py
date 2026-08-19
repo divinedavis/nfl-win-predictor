@@ -52,9 +52,10 @@ def baseline_probs(done: pd.DataFrame, seasons: list[int]) -> pd.Series:
     return out
 
 
-def run_sims(games: pd.DataFrame, model_path: str, n: int) -> pd.DataFrame:
+def run_sims(games: pd.DataFrame, model_path: str, n: int,
+             margins_path: str | None = None) -> pd.DataFrame:
     sim = Simulator.load(model_path)
-    rows = []
+    rows, margins = [], {}
     for i, (_, g) in enumerate(games.iterrows(), 1):
         out = sim.simulate_game(g, n=n, seed=game_seed(g.game_id))
         margin = out["margin"]
@@ -83,8 +84,15 @@ def run_sims(games: pd.DataFrame, model_path: str, n: int) -> pd.DataFrame:
             "q10": np.quantile(margin, 0.10), "q25": np.quantile(margin, 0.25),
             "q75": np.quantile(margin, 0.75), "q90": np.quantile(margin, 0.90),
         })
+        if margins_path:
+            margins[g.game_id] = margin.astype("int16")
         if i % 20 == 0:
             print(f"  {i}/{len(games)} games", file=sys.stderr)
+    if margins_path:
+        # Keeping the full simulated margins makes every later distribution
+        # question answerable without re-simulating for half an hour.
+        np.savez_compressed(margins_path, **margins)
+        print(f"wrote {margins_path}", file=sys.stderr)
     return pd.DataFrame(rows)
 
 
@@ -168,6 +176,8 @@ def main() -> None:
     ap.add_argument("--limit", type=int, default=None, help="sample this many games")
     ap.add_argument("--cache", default=CACHE)
     ap.add_argument("--reuse", action="store_true", help="skip simulating, read the cache")
+    ap.add_argument("--save-margins", default=None,
+                    help="also store every game's simulated margins (.npz)")
     args = ap.parse_args()
 
     feat = pd.read_parquet("features.parquet")
@@ -180,7 +190,7 @@ def main() -> None:
         df = pd.read_csv(args.cache)
     else:
         print(f"simulating {len(games)} games at n={args.n}...", file=sys.stderr)
-        df = run_sims(games, args.model, args.n)
+        df = run_sims(games, args.model, args.n, args.save_margins)
         df.to_csv(args.cache, index=False)
         print(f"wrote {args.cache}", file=sys.stderr)
 
