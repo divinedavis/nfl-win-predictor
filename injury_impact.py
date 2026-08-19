@@ -1,21 +1,33 @@
-"""What an injury costs, measured drive by drive instead of in one number.
+"""What an injury costs -- simulated, and then checked against what really happened.
 
-position_impact.py asks the game-level model the same question and gets back a
-single win-probability delta, because that model sees an absence once. The world
-model sees it on every snap, so the answer comes with a mechanism attached:
+READ THE VERDICT COLUMN. This tool was built on the theory that spreading an
+absence across every snap would surface value the game-level model absorbs into
+Elo. Measured on 2026-08-19, that theory is WRONG, and wrong in a way worth
+keeping the tool around to demonstrate:
 
-    DL   -1.4% win prob   sacks 7.3% -> 6.6%   opponent +0.19 yds/play   +0.8 pts
+    group   simulated        actually happened      n
+    DL      opp +2.50 pts    opp +0.32 pts        108
+    LB      opp +1.96 pts    opp -0.13 pts        235
+    TE      own +1.12 pts    own +0.33 pts         66
 
-That is the case for simulating at all. A pass rusher's value is not one number
-applied once; it is a slightly worse outcome on sixty dropbacks, compounded
-through drive structure into points. A game-level classifier has to price that
-in a single coefficient and, as this repo has measured before, Elo tends to
-swallow it -- single defensive outs read as roughly zero there.
+Compounding cuts both ways. A small per-play error multiplied by 130 plays
+becomes a large fake number, so the simulator overstates a defensive lineman by
+roughly eight times. The repo's existing finding stands: one defensive starter
+out is worth close to nothing, and position_impact.py was right to read it as
+about zero.
 
-The counterfactual matches position_impact.py so the two are comparable: one
-full-time player ruled Out (weighted outs 1.0) against a fully healthy group.
-The player's rating is set to what a real full-time absence at that group
-actually looks like in the data, not an invented constant.
+Two separate problems produce the bad rows:
+
+  * thin evidence -- teams rotate running backs and tight ends, so a genuinely
+    full-time one is rare (21 and 66 games in eleven seasons against 250 for
+    quarterbacks). The heads learn noise and the simulator reports it with a
+    straight face. Watch the n column.
+  * amplification -- even where evidence is decent, a per-play bias compounds
+    over a full game into points that are not there.
+
+So every simulated number here is printed next to the real-world effect for the
+same absence, with the sample size behind it. Trust the simulated figure only
+where the two agree and n is large. Do not put these numbers on the site.
 
     python injury_impact.py                       # every group, sampled games
     python injury_impact.py --group dl --games 40
@@ -59,6 +71,32 @@ def typical_absence(feat: pd.DataFrame, grp: str) -> dict[str, float]:
         vals = vals[vals > 0]
         out[tmpl] = float(vals.median()) if len(vals) >= 20 else 1.0
     return out
+
+
+def observed_effect(feat: pd.DataFrame, grp: str) -> tuple[float, int]:
+    """What really happened, from the games themselves.
+
+    An offensive absence is measured against that offence's own scoring average
+    for the season; a defensive one against how much that defence normally
+    allows. Comparing a team to itself cancels team quality, which is the whole
+    confound.
+    """
+    defensive = grp in DEF_GROUPS
+    rows = []
+    for side, opp in (("home", "away"), ("away", "home")):
+        pts = feat[f"{opp}_score"] if defensive else feat[f"{side}_score"]
+        rows.append(pd.DataFrame({
+            "team": feat[f"{side}_team"].values, "season": feat["season"].values,
+            "pts": pts.values, "wt": feat[f"{side}_{grp}_out_wt"].values,
+        }))
+    t = pd.concat(rows, ignore_index=True)
+    t["base"] = t.groupby(["team", "season"]).pts.transform("mean")
+    t["diff"] = t.pts - t.base
+    out = t[(t.wt >= 0.85) & (t.wt < 1.15)]
+    healthy = t[t.wt < 0.05]
+    if len(out) < 10:
+        return float("nan"), len(out)
+    return float(out["diff"].mean() - healthy["diff"].mean()), len(out)
 
 
 def _rates(sim: Simulator, n_games: int) -> dict:
@@ -131,24 +169,37 @@ def main() -> None:
 
     print(f"Cost of ONE full-time player ruled Out, simulated over "
           f"{len(games)} games at n={args.n}\n")
-    print(f"  {'grp':>3}  {'win prob':>9}  {'own pts':>8}  {'opp pts':>8}  "
-          f"{'opp sack%':>18}  {'opp yds/play':>12}")
-    rows = []
+    print(f"  {'grp':>3}  {'win prob':>9}  {'simulated':>10}  {'REALLY':>9}  "
+          f"{'n':>5}  {'verdict':>12}")
+    print(f"  {'':>3}  {'':>9}  {'pts':>10}  {'pts':>9}  {'':>5}")
     for grp in args.group:
         absence = typical_absence(done, grp)
         r = measure(sim, games, args.side, grp, absence, args.n)
-        rows.append((grp, r))
-        # A defensive absence is felt by the opponent's offence, so the sack and
-        # yardage columns describe whichever offence the group faces.
-        sk = f"{r['sack_healthy']:.1%} -> {r['sack_hurt']:.1%}"
-        print(f"  {grp.upper():>3}  {r['d_win_prob']:>+8.1%}  "
-              f"{r['d_own_points']:>+8.2f}  {r['d_opp_points']:>+8.2f}  "
-              f"{sk:>18}  {r['d_yds_per_play']:>+12.3f}")
+        real, n = observed_effect(done, grp)
+        # The simulated figure to compare is whichever side of the ball the
+        # group actually acts on.
+        simulated = r["d_opp_points"] if grp in DEF_GROUPS else r["d_own_points"]
+        if n < 100:
+            verdict = "TOO FEW"
+        elif not np.isfinite(real) or abs(real) < 1e-9:
+            verdict = "no real effect"
+        elif np.sign(simulated) != np.sign(real):
+            verdict = "WRONG SIGN"
+        elif abs(simulated) > 2.5 * abs(real):
+            verdict = f"{abs(simulated / real):.0f}x TOO BIG"
+        else:
+            verdict = "agrees"
+        print(f"  {grp.upper():>3}  {r['d_win_prob']:>+8.1%}  {simulated:>+10.2f}  "
+              f"{real:>+9.2f}  {n:>5}  {verdict:>12}")
 
-    print("\nOffensive groups are measured on their own offence; defensive "
-          "groups\nshow the effect on the offence they face. Ratings come from "
-          "what a real\nfull-time absence at that group looks like in the data, "
-          "not a fixed constant.")
+    print("\n  'REALLY' is what happened in the actual games: a team's scoring "
+          "when that\n  group had a starter out, against its own average for "
+          "the season, so team\n  quality cancels. Defensive groups are scored "
+          "on what the opponent did.\n"
+          "\n  Trust a simulated number only where the verdict says it agrees "
+          "and n is\n  large. A small per-play error compounds over 130 plays "
+          "into points that\n  are not there -- see this module's docstring. "
+          "Do not put these on the site.")
 
 
 if __name__ == "__main__":
