@@ -362,6 +362,34 @@
   .card li .who { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .card li .who em { font-style: normal; color: var(--muted); font-size: 0.8rem; }
   .card li .val { font-weight: 700; font-variant-numeric: tabular-nums; }
+
+  /* Live win probability, refreshed from live.json while games are on. */
+  .live { margin: 0 0 18px; border: 1px solid var(--line); border-radius: 10px;
+          background: var(--surface); overflow: hidden; }
+  .live-head { display: flex; align-items: center; gap: 8px; padding: 10px 14px;
+               border-bottom: 1px solid var(--line); font-weight: 700;
+               font-size: 0.9rem; letter-spacing: 0.02em; }
+  .live-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--alert);
+              box-shadow: 0 0 0 0 var(--alert); animation: livePulse 2s infinite; }
+  @keyframes livePulse {
+    0%   { box-shadow: 0 0 0 0 rgba(178,59,49,0.55); }
+    70%  { box-shadow: 0 0 0 7px rgba(178,59,49,0); }
+    100% { box-shadow: 0 0 0 0 rgba(178,59,49,0); }
+  }
+  @media (prefers-reduced-motion: reduce) { .live-dot { animation: none; } }
+  .live-head .sub { font-weight: 400; color: var(--muted); font-size: 0.8rem;
+                    letter-spacing: 0; margin-left: auto; }
+  .live-game { padding: 11px 14px; border-top: 1px solid var(--line); }
+  .live-game:first-child { border-top: none; }
+  .live-score { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap;
+                font-variant-numeric: tabular-nums; }
+  .live-score .teams { font-weight: 700; }
+  .live-score .situ { color: var(--muted); font-size: 0.85rem; }
+  .live-wp { display: flex; align-items: center; gap: 10px; margin-top: 7px; }
+  .live-wp .meter { flex: 1; }
+  .live-wp .pct { font-weight: 700; font-variant-numeric: tabular-nums;
+                  font-size: 0.9rem; min-width: 3.6em; text-align: right; }
+  .live-proj { color: var(--muted); font-size: 0.8rem; margin-top: 5px; }
 </style>
 
 <div class="wrap">
@@ -371,6 +399,12 @@
       <span class="tagline display" id="genLabel"></span>
     </div>
   </header>
+
+  <section class="live" id="liveNow" hidden aria-live="polite">
+    <div class="live-head"><span class="live-dot"></span>Live now
+      <span class="sub" id="liveStamp"></span></div>
+    <div id="liveGames"></div>
+  </section>
 
   <div class="picker">
     <div class="picker-label">Pick your team</div>
@@ -1295,6 +1329,51 @@
     expanded.has(id) ? expanded.delete(id) : expanded.add(id);
     render();
   }
+  // Live win probability. The page is a static file, so the simulator writes
+  // live.json beside it and this polls that -- no API, no build step. The strip
+  // stays hidden unless a game is actually mid-drive, so the page looks the
+  // same as it always did the rest of the week.
+  const LIVE_POLL_MS = 45000;
+  const liveEl = document.getElementById("liveNow");
+  const liveGamesEl = document.getElementById("liveGames");
+  const liveStampEl = document.getElementById("liveStamp");
+
+  function renderLive(games) {
+    if (!Array.isArray(games) || !games.length) { liveEl.hidden = true; return; }
+    liveGamesEl.innerHTML = games.map(g => {
+      const wp = Math.max(0, Math.min(1, Number(g.home_win_prob) || 0));
+      const homeFav = wp >= 0.5;
+      const shown = homeFav ? wp : 1 - wp;
+      const who = homeFav ? g.home_team : g.away_team;
+      return '<div class="live-game">' +
+        '<div class="live-score"><span class="teams">' +
+          esc(g.away_team) + " " + esc(g.away_score) + " &middot; " +
+          esc(g.home_team) + " " + esc(g.home_score) + "</span>" +
+        '<span class="situ">Q' + esc(g.period) + " " + esc(g.clock) +
+          (g.summary ? " &middot; " + esc(g.summary) : "") + "</span></div>" +
+        '<div class="live-wp"><div class="meter"><div class="fill' +
+          (homeFav ? "" : " dog") + '" style="width:' + (shown * 100).toFixed(1) +
+          '%"></div></div><span class="pct">' + esc(who) + " " +
+          (shown * 100).toFixed(0) + "%</span></div>" +
+        '<div class="live-proj">Simulated finish ' +
+          esc(Math.round(g.proj_away)) + "&ndash;" + esc(Math.round(g.proj_home)) +
+        "</div></div>";
+    }).join("");
+    liveStampEl.textContent = "updated " + new Date().toLocaleTimeString();
+    liveEl.hidden = false;
+  }
+
+  function pollLive() {
+    fetch("live.json?t=" + Date.now(), { cache: "no-store" })
+      .then(r => (r.ok ? r.json() : []))
+      .then(renderLive)
+      // A missing or unreachable live.json is the normal weekday state, not an
+      // error worth showing anyone.
+      .catch(() => { liveEl.hidden = true; });
+  }
+  pollLive();
+  setInterval(pollLive, LIVE_POLL_MS);
+
   const mainEl = document.getElementById("main");
   mainEl.addEventListener("click", toggleGame);
   mainEl.addEventListener("keydown", e => {

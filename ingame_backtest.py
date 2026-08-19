@@ -34,7 +34,7 @@ from simulate import Simulator, game_seed
 # down and a clock, before the game is effectively over.
 NEEDED = ["game_id", "play_id", "posteam", "home_team", "away_team", "down",
           "ydstogo", "yardline_100", "half_seconds_remaining", "qtr",
-          "total_home_score", "total_away_score", "home_wp", "vegas_home_wp",
+          "posteam_score", "defteam_score", "home_wp", "vegas_home_wp",
           "play_type",
           "posteam_timeouts_remaining", "defteam_timeouts_remaining"]
 
@@ -44,7 +44,8 @@ def sample_states(season: int, n_states: int, seed: int) -> pd.DataFrame:
     df = pbp[[c for c in NEEDED if c in pbp.columns]].copy()
     df = df[df.play_type.isin(["run", "pass", "punt", "field_goal"])
             & df.down.notna() & df.home_wp.notna() & df.vegas_home_wp.notna()
-            & df.yardline_100.notna() & df.half_seconds_remaining.notna()]
+            & df.yardline_100.notna() & df.half_seconds_remaining.notna()
+            & df.posteam_score.notna() & df.defteam_score.notna()]
     # Regulation only: overtime states are rare and the comparison there is
     # dominated by the coin toss rather than by the dynamics.
     df = df[df.qtr <= 4]
@@ -74,23 +75,29 @@ def main() -> None:
         if row is None or p.game_id not in outcome:
             continue
         half = 1 if p.qtr <= 2 else 2
+        # posteam_score/defteam_score are the score BEFORE the snap.
+        # total_home_score/total_away_score are the score after the play
+        # resolves, so using those leaks the very touchdown being predicted.
+        pos_is_home = p.posteam == p.home_team
+        home_score = int(p.posteam_score if pos_is_home else p.defteam_score)
+        away_score = int(p.defteam_score if pos_is_home else p.posteam_score)
         res = sim.simulate_from(
             row,
-            pos_is_home=(p.posteam == p.home_team),
+            pos_is_home=pos_is_home,
             yardline_100=float(p.yardline_100),
             down=int(p.down), ydstogo=float(p.ydstogo),
             half_seconds_remaining=float(p.half_seconds_remaining),
             half=half,
-            home_score=int(p.total_home_score), away_score=int(p.total_away_score),
+            home_score=home_score, away_score=away_score,
             home_timeouts=int(p.get("posteam_timeouts_remaining", 3) or 3)
-            if p.posteam == p.home_team else 3,
+            if pos_is_home else 3,
             away_timeouts=3,
             n=args.n, seed=game_seed(f"{p.game_id}:{p.play_id}"),
         )
         out.append({
             "game_id": p.game_id, "qtr": int(p.qtr),
             "half_seconds_remaining": float(p.half_seconds_remaining),
-            "score_diff": int(p.total_home_score - p.total_away_score),
+            "score_diff": home_score - away_score,
             "play_id": p.play_id,
             "sim_wp": res["home_win_prob"], "nflfastr_wp": float(p.home_wp),
             "vegas_wp": float(p.vegas_home_wp),

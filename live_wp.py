@@ -29,6 +29,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 import time
 import urllib.error
@@ -164,18 +165,35 @@ def price(sim: Simulator, row: pd.Series, g: dict, n: int) -> dict:
     }
 
 
+def write_payload(rows: list, path: str) -> None:
+    """Write live.json atomically.
+
+    The browser polls this file every 45 seconds; a partially written one would
+    surface as a parse error mid-game. Rename is atomic on the same filesystem,
+    so a reader sees either the old payload or the new one.
+    """
+    tmp = f"{path}.tmp"
+    with open(tmp, "w") as fh:
+        json.dump(rows, fh, separators=(",", ":"))
+    os.replace(tmp, path)
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--model", default="world_model.pkl")
     ap.add_argument("--date", default=None, help="YYYYMMDD, for checking the wiring")
     ap.add_argument("--n", type=int, default=3000)
     ap.add_argument("--json", action="store_true", help="emit the dashboard payload")
+    ap.add_argument("--out", default=None,
+                    help="write the payload here instead of stdout, atomically")
     args = ap.parse_args()
 
     try:
         payload = fetch_scoreboard(args.date)
     except (urllib.error.URLError, TimeoutError, json.JSONDecodeError) as exc:
         # A live feed being down must never take the daily rebuild with it.
+        # Leave whatever is on disk alone: a blip in someone else's feed must
+        # not blank out a live game that is still being played.
         print(f"scoreboard unavailable: {exc}", file=sys.stderr)
         if args.json:
             print("[]")
@@ -188,6 +206,8 @@ def main() -> None:
         states = ", ".join(sorted({g["state"] or "?" for g in games})) or "none"
         print(f"no game is mid-drive right now ({len(games)} on the slate: {states})",
               file=sys.stderr)
+        if args.out:
+            write_payload([], args.out)
         if args.json:
             print("[]")
         return
@@ -206,6 +226,9 @@ def main() -> None:
                          "home_score", "away_score", "period", "clock", "summary")},
                      **r})
 
+    if args.out:
+        write_payload(rows, args.out)
+        print(f"wrote {len(rows)} live game(s) to {args.out}", file=sys.stderr)
     if args.json:
         print(json.dumps(rows, indent=1))
         return
