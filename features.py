@@ -428,7 +428,13 @@ def load_clutch_rolling() -> pd.DataFrame:
             lambda s: s.shift(1).rolling(CLUTCH_ROLL, min_periods=8).sum())
         rate = epa_r / plays_r.replace(0, np.nan)
         c[f"clutch_{side}16"] = rate.where(plays_r >= CLUTCH_MIN_PLAYS)
-    return c[["season", "week", "team", "clutch_off16", "clutch_def16"]]
+    # A sortable stamp, so an upcoming game can pick up the most recent value a
+    # team has rather than finding no row at all. The rolling above already
+    # shifts by one, so the row stamped for a week is built only from weeks
+    # before it and matching a week exactly cannot leak.
+    c["clutch_ord"] = c["season"] * 100 + c["week"]
+    return c[["clutch_ord", "team", "clutch_off16", "clutch_def16"]].sort_values(
+        "clutch_ord")
 
 
 def build_features() -> pd.DataFrame:
@@ -948,15 +954,29 @@ def build_features() -> pd.DataFrame:
     ]).sort_values("rating", ascending=False)
     ratings.to_csv("player_ratings.csv", index=False)
 
-    df = pd.DataFrame(rows)
+    df = pd.DataFrame(rows).reset_index(drop=True)
     clutch = load_clutch_rolling()
+    # Matched as-of rather than exactly. The clutch cache only holds weeks that
+    # have been PLAYED, so an exact merge left every upcoming game with nothing
+    # -- which meant the model's single strongest input was absent from every
+    # prediction the site actually shows, while every backtest looked fine
+    # because backtests only ever score games that already happened. Carrying
+    # each team's most recent value forward costs 0.0022 of Brier, measured.
+    df["clutch_ord"] = df["season"] * 100 + df["week"]
     for side in ("home", "away"):
-        df = df.merge(
-            clutch.rename(columns={
-                "team": f"{side}_team",
-                "clutch_off16": f"{side}_clutch_off16",
-                "clutch_def16": f"{side}_clutch_def16"}),
-            on=["season", "week", f"{side}_team"], how="left")
+        if clutch.empty:
+            df[f"{side}_clutch_off16"] = np.nan
+            df[f"{side}_clutch_def16"] = np.nan
+            continue
+        left = (df[["clutch_ord", f"{side}_team"]]
+                .rename(columns={f"{side}_team": "team"})
+                .reset_index().sort_values("clutch_ord"))
+        m = pd.merge_asof(left, clutch, on="clutch_ord", by="team",
+                          direction="backward")
+        m = m.set_index("index").sort_index()
+        df[f"{side}_clutch_off16"] = m["clutch_off16"].to_numpy()
+        df[f"{side}_clutch_def16"] = m["clutch_def16"].to_numpy()
+    df = df.drop(columns="clutch_ord")
     df["clutch_net_diff"] = (
         (df["home_clutch_off16"].fillna(0) - df["home_clutch_def16"].fillna(0))
         - (df["away_clutch_off16"].fillna(0) - df["away_clutch_def16"].fillna(0)))

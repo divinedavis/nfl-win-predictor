@@ -52,8 +52,18 @@ def main() -> None:
                 .rename(columns={"defteam": "team", "sum": "def_clutch_epa",
                                  "count": "def_clutch_plays"}))
         merged = off.merge(def_, on=["season", "week", "team"], how="outer")
+        # Every team that played that week gets a row, even one with nothing in
+        # it. A blowout produces no last-five-minute one-score snaps at all, and
+        # without a zero row that team-week simply vanished from the table --
+        # which left the rolling window with no row to attach a value to and
+        # blanked the model's strongest input on 41% of played games.
+        played = pd.concat([
+            pbp[["season", "week", "posteam"]].rename(columns={"posteam": "team"}),
+            pbp[["season", "week", "defteam"]].rename(columns={"defteam": "team"}),
+        ]).dropna().drop_duplicates()
+        merged = played.merge(merged, on=["season", "week", "team"], how="left")
         frames.append(merged)
-        print(f"{season}: {len(c)} clutch plays")
+        print(f"{season}: {len(c)} clutch plays, {len(merged)} team-games")
 
     out = pd.concat(frames, ignore_index=True).fillna(0)
     out["team"] = out["team"].map(canon)
