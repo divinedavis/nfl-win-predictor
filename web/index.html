@@ -945,8 +945,11 @@
   function renderProps() {
     const P = DATA.props;
     const q = propQuery.trim().toLowerCase();
+    // Match the full club names too, so "chiefs" and "kansas city" find KC.
+    const full = ab => (teams[ab] ? teams[ab].name : "") + " " + ab;
     const hit = pl => !q ||
-      (pl.player + " " + pl.pos + " " + pl.team + " " + pl.opp).toLowerCase().includes(q);
+      (pl.player + " " + pl.pos + " " + full(pl.team) + " " + full(pl.opp))
+        .toLowerCase().includes(q);
 
     let html = '<div class="controls propbar">' +
       '<input id="propSearch" class="search" type="search" autocomplete="off" ' +
