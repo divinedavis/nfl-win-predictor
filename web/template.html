@@ -162,6 +162,43 @@
   /* The option list is drawn by the OS, so it needs the page colors spelled out. */
   .team-select option, .team-select optgroup { background: var(--surface); color: var(--ink); }
 
+  .authbtn {
+    border: 1px solid var(--line); background: var(--surface); color: var(--muted);
+    border-radius: 6px; padding: 4px 10px; cursor: pointer;
+    font-family: system-ui, sans-serif; font-size: 0.72rem; font-weight: 600;
+    text-transform: uppercase; letter-spacing: 0.08em;
+  }
+  .authbtn:hover { border-color: var(--field); color: var(--ink); }
+  .authbtn:focus-visible { outline: 2px solid var(--field); outline-offset: 1px; }
+  .who-am-i { color: var(--muted); font-size: 0.78rem; }
+
+  /* Track control: a star that fills in when the row is saved. */
+  .trackbtn {
+    border: 1px solid var(--line); background: var(--surface); color: var(--muted);
+    border-radius: 6px; padding: 2px 7px; cursor: pointer; line-height: 1.3;
+    font-size: 0.9rem; flex: none;
+  }
+  .trackbtn:hover { border-color: var(--star); color: var(--star); }
+  .trackbtn:focus-visible { outline: 2px solid var(--field); outline-offset: 1px; }
+  .trackbtn[aria-pressed="true"] { color: var(--star); border-color: var(--star); background: var(--star-soft); }
+  .who .trackbtn { margin-right: 6px; padding: 0 6px; vertical-align: 1px; }
+  .signin-card { display: grid; gap: 10px; }
+  .signin-card .oauth {
+    display: flex; align-items: center; justify-content: center; gap: 9px;
+    border: 1px solid var(--line); background: var(--surface); color: var(--ink);
+    border-radius: 8px; padding: 11px 14px; cursor: pointer;
+    font-family: system-ui, sans-serif; font-size: 0.95rem; font-weight: 600;
+  }
+  .signin-card .oauth:hover { border-color: var(--field); }
+  .signin-card .oauth svg { width: 18px; height: 18px; }
+  .fineprint { color: var(--muted); font-size: 0.8rem; }
+  .toast {
+    position: fixed; left: 50%; bottom: 22px; transform: translateX(-50%);
+    background: var(--ink); color: var(--bg); border-radius: 8px;
+    padding: 9px 14px; font-family: system-ui, sans-serif; font-size: 0.86rem;
+    z-index: 50; max-width: 90vw;
+  }
+
   .propbar { gap: 8px; }
   .search {
     flex: 1 1 220px; min-width: 0;
@@ -461,6 +498,7 @@
       <h1>Gridiron Odds <span class="season" id="seasonLabel"></span></h1>
       <span class="tagline display" id="genLabel"></span>
       <a class="how" href="how-it-works.html">How it works</a>
+      <button class="authbtn" id="authBtn" hidden></button>
     </div>
   </header>
 
@@ -488,7 +526,7 @@
     </div>
     <div class="conf-row">
       <span class="conf-tag"></span>
-      <div class="chips"><button class="chip all" id="allBtn" aria-pressed="true">All games, week by week</button><button class="chip all" id="qbBtn" aria-pressed="false" hidden>QB grades by quarter</button><button class="chip all" id="propsBtn" aria-pressed="false" hidden>Player props</button></div>
+      <div class="chips"><button class="chip all" id="allBtn" aria-pressed="true">All games, week by week</button><button class="chip all" id="qbBtn" aria-pressed="false" hidden>QB grades by quarter</button><button class="chip all" id="propsBtn" aria-pressed="false" hidden>Player props</button><button class="chip all" id="savedBtn" aria-pressed="false" hidden>My tracking</button></div>
     </div>
   </div>
 
@@ -865,6 +903,12 @@
         teams[team].name.split(" ").pop() + " win" + (conf(next) >= 0.65 ? " — ★ high confidence" : "") +
         "</small></div></div>";
     }
+    const track = starBtn("team", team, teams[team].name);
+    if (track) {
+      html += '<div class="controls">' + track +
+        '<span class="lbl">Track the ' + teams[team].name.split(" ").pop() +
+        " &mdash; their next game shows up under My tracking</span></div>";
+    }
     const done = sched.filter(played);
     let record = "";
     if (done.length) {
@@ -929,7 +973,8 @@
         (p.carAvg ? " (career " + p.carAvg + ")" : "") + tilt + "</div>";
     }
     return '<div class="prop-row">' +
-      '<div class="who"><span class="code">' + p.player + "</span>" + st +
+      '<div class="who">' + starBtn("player", p.player, p.player + " · " + p.pos + " · " + p.team) +
+      '<span class="code">' + p.player + "</span>" + st +
       '<div class="sub">' + p.pos + " · " + p.team + "</div>" + hist + "</div>" +
       '<div class="vs">' + (p.home ? "vs " : "@ ") + p.opp + '</div>' +
       '<div class="rng" role="img" aria-label="80% range ' + p.p10 + " to " + p.p90 + '">' +
@@ -1286,10 +1331,274 @@
     return html;
   }
 
+  // ---- optional accounts ----------------------------------------------
+  // Signing in is never required to read the page; it only makes the star
+  // buttons persist. The project has no email/password provider enabled, so
+  // there is no password to lose and no verification mail to send — OAuth is
+  // the whole surface. Tokens go through PKCE and land in localStorage, which
+  // is where supabase-js would put them; the page talks to PostgREST directly
+  // rather than pulling a client library off a CDN.
+  const SB_URL = "https://chhmerckwgytnjhgdiym.supabase.co";
+  const SB_KEY = "sb_publishable_YY0S0mf2V74kwzjNhG_kvA_WzaGTWES";
+  // Providers the Supabase project actually has credentials for. Apple joins
+  // the list once its Services ID exists; an empty list hides sign-in entirely.
+  const SB_PROVIDERS = [];
+  const SESS_KEY = "gridiron.session";
+  const VERIFIER_KEY = "gridiron.pkce";
+
+  let session = null;              // {access_token, refresh_token, expires_at, user}
+  let favs = new Map();            // "kind:ref" -> label
+
+  const store = {
+    get(k) { try { return JSON.parse(localStorage.getItem(k)); } catch (e) { return null; } },
+    set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) { /* private mode */ } },
+    del(k) { try { localStorage.removeItem(k); } catch (e) { /* private mode */ } },
+  };
+
+  function toast(msg) {
+    const el = document.createElement("div");
+    el.className = "toast";
+    el.setAttribute("role", "status");
+    el.textContent = msg;
+    document.body.appendChild(el);
+    setTimeout(() => el.remove(), 3200);
+  }
+
+  const b64url = buf => btoa(String.fromCharCode(...new Uint8Array(buf)))
+    .replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+
+  async function signIn(provider) {
+    const bytes = new Uint8Array(32);
+    crypto.getRandomValues(bytes);
+    const verifier = b64url(bytes);
+    const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(verifier));
+    store.set(VERIFIER_KEY, verifier);
+    const redirect = location.origin + location.pathname;
+    location.href = SB_URL + "/auth/v1/authorize?provider=" + encodeURIComponent(provider) +
+      "&redirect_to=" + encodeURIComponent(redirect) +
+      "&code_challenge=" + encodeURIComponent(b64url(digest)) +
+      "&code_challenge_method=s256";
+  }
+
+  function setSession(s) {
+    if (!s || !s.access_token) return false;
+    session = {
+      access_token: s.access_token,
+      refresh_token: s.refresh_token,
+      // expires_in is seconds from now; store the wall-clock deadline instead.
+      expires_at: s.expires_at ? s.expires_at * 1000 : Date.now() + (s.expires_in || 3600) * 1000,
+      user: s.user ? { id: s.user.id, email: s.user.email,
+                       name: (s.user.user_metadata || {}).name || "" } : null,
+    };
+    store.set(SESS_KEY, session);
+    return true;
+  }
+
+  function signOutLocal() {
+    session = null;
+    favs = new Map();
+    store.del(SESS_KEY);
+  }
+
+  async function tokenPost(grant, body) {
+    const r = await fetch(SB_URL + "/auth/v1/token?grant_type=" + grant, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", apikey: SB_KEY },
+      body: JSON.stringify(body),
+    });
+    if (!r.ok) throw new Error("auth " + r.status);
+    return r.json();
+  }
+
+  // Returns a live access token, refreshing a minute before expiry, or null
+  // when the visitor is signed out (or the refresh token has been revoked).
+  async function accessToken() {
+    if (!session) return null;
+    if (Date.now() < session.expires_at - 60000) return session.access_token;
+    try {
+      setSession(await tokenPost("refresh_token", { refresh_token: session.refresh_token }));
+      return session.access_token;
+    } catch (e) {
+      signOutLocal();
+      return null;
+    }
+  }
+
+  async function rest(path, opts) {
+    const tok = await accessToken();
+    if (!tok) return null;
+    const o = opts || {};
+    const r = await fetch(SB_URL + "/rest/v1/" + path, {
+      method: o.method || "GET",
+      headers: Object.assign({
+        apikey: SB_KEY,
+        Authorization: "Bearer " + tok,
+        "Content-Type": "application/json",
+      }, o.headers || {}),
+      body: o.body ? JSON.stringify(o.body) : undefined,
+    });
+    if (!r.ok) throw new Error("rest " + r.status + " " + (await r.text()).slice(0, 120));
+    return r.status === 204 ? null : r.json();
+  }
+
+  async function loadFavs() {
+    const rows = await rest("favorites?select=kind,ref,label");
+    favs = new Map((rows || []).map(f => [f.kind + ":" + f.ref, f.label || f.ref]));
+  }
+
+  const isFav = (kind, ref) => favs.has(kind + ":" + ref);
+
+  async function toggleFav(kind, ref, label) {
+    if (!session) { showSignIn(); return; }
+    const key = kind + ":" + ref;
+    const had = favs.has(key);
+    // Flip locally first so the star responds on the tap, then reconcile.
+    if (had) favs.delete(key); else favs.set(key, label);
+    render();
+    try {
+      if (had) {
+        await rest("favorites?kind=eq." + encodeURIComponent(kind) +
+                   "&ref=eq." + encodeURIComponent(ref), { method: "DELETE" });
+      } else {
+        await rest("favorites", {
+          method: "POST",
+          headers: { Prefer: "resolution=ignore-duplicates,return=minimal" },
+          body: [{ user_id: session.user.id, kind: kind, ref: ref, label: label }],
+        });
+      }
+    } catch (e) {
+      if (had) favs.set(key, label); else favs.delete(key);
+      render();
+      toast("Could not save that — try again in a moment.");
+    }
+  }
+
+  function showSignIn() {
+    const G = '<svg viewBox="0 0 48 48" aria-hidden="true">' +
+      '<path fill="#EA4335" d="M24 9.5c3.5 0 6.6 1.2 9 3.6l6.7-6.7C35.6 2.6 30.2.5 24 .5 14.6.5 6.5 5.8 2.6 13.6l7.8 6.1C12.3 13.6 17.6 9.5 24 9.5z"/>' +
+      '<path fill="#4285F4" d="M46.9 24.5c0-1.6-.1-3.2-.4-4.7H24v9h12.9c-.6 3-2.3 5.6-4.9 7.3l7.6 5.9c4.4-4.1 7.3-10.2 7.3-17.5z"/>' +
+      '<path fill="#FBBC05" d="M10.4 28.3a14.6 14.6 0 0 1 0-8.6l-7.8-6.1a24 24 0 0 0 0 20.8l7.8-6.1z"/>' +
+      '<path fill="#34A853" d="M24 47.5c6.5 0 11.9-2.1 15.9-5.8l-7.6-5.9c-2.1 1.4-4.8 2.2-8.3 2.2-6.4 0-11.7-4.1-13.6-9.7l-7.8 6.1C6.5 42.2 14.6 47.5 24 47.5z"/></svg>';
+    const A = '<svg viewBox="0 0 24 24" aria-hidden="true" fill="currentColor">' +
+      '<path d="M16.4 12.7c0-2.6 2.1-3.9 2.2-4-1.2-1.8-3.1-2-3.8-2-1.6-.2-3.1.9-3.9.9-.8 0-2-.9-3.3-.9-1.7 0-3.3 1-4.2 2.5-1.8 3.1-.5 7.7 1.3 10.2.9 1.2 1.9 2.6 3.2 2.6 1.3-.1 1.8-.8 3.3-.8 1.5 0 2 .8 3.3.8 1.4 0 2.2-1.2 3.1-2.5 1-1.4 1.4-2.8 1.4-2.9-.1 0-2.6-1-2.6-3.9zM14 4.5c.7-.9 1.2-2.1 1.1-3.3-1 0-2.3.7-3.1 1.6-.7.8-1.2 2-1.1 3.2 1.2.1 2.4-.6 3.1-1.5z"/></svg>';
+    const buttons = SB_PROVIDERS.map(pr => pr === "google"
+      ? '<button class="oauth" data-oauth="google">' + G + "Continue with Google</button>"
+      : '<button class="oauth" data-oauth="apple">' + A + "Continue with Apple</button>").join("");
+    const bg = modal("Save your teams and players",
+      '<div class="signin-card">' +
+      '<p class="fineprint">Signing in is optional — everything on this page stays ' +
+      "readable without an account. It only keeps the teams and players you star, " +
+      "so they follow you to your phone.</p>" +
+      (buttons || '<p class="fineprint">Sign-in is not switched on yet.</p>') +
+      '<p class="fineprint">No password, and no email to confirm. We store the ' +
+      "account your provider hands back and the list of things you star &mdash; nothing else.</p></div>");
+    bg.querySelectorAll("[data-oauth]").forEach(b => {
+      b.onclick = () => signIn(b.dataset.oauth);
+    });
+  }
+
+  function authRender() {
+    const btn = document.getElementById("authBtn");
+    btn.hidden = SB_PROVIDERS.length === 0;
+    btn.textContent = session ? "Sign out" : "Sign in";
+    btn.title = session && session.user && session.user.email
+      ? "Signed in as " + session.user.email : "Save the teams and players you follow";
+    const saved = document.getElementById("savedBtn");
+    saved.hidden = !session;
+  }
+
+  // Finish a redirect back from the provider, or restore a stored session.
+  async function authBoot() {
+    const url = new URL(location.href);
+    const code = url.searchParams.get("code");
+    const err = url.searchParams.get("error_description") || url.searchParams.get("error");
+    if (code || err) {
+      // Drop the query string either way so a refresh cannot replay it.
+      history.replaceState(null, "", location.pathname);
+    }
+    if (err) toast("Sign-in was cancelled.");
+    if (code) {
+      const verifier = store.get(VERIFIER_KEY);
+      store.del(VERIFIER_KEY);
+      try {
+        setSession(await tokenPost("pkce", { auth_code: code, code_verifier: verifier }));
+      } catch (e) {
+        toast("Sign-in did not complete. Try again.");
+      }
+    } else {
+      const stored = store.get(SESS_KEY);
+      if (stored && stored.refresh_token) session = stored;
+    }
+    if (session) {
+      try { await loadFavs(); } catch (e) { signOutLocal(); }
+    }
+    authRender();
+    render();
+  }
+
+  // A star renders only when sign-in is switched on; with no providers wired
+  // there is nowhere to save to, so the button would be a dead end.
+  function starBtn(kind, ref, label) {
+    if (!SB_PROVIDERS.length) return "";
+    const on = isFav(kind, ref);
+    return '<button class="trackbtn" data-track="' + kind + '" data-ref="' + esc(ref) +
+      '" data-label="' + esc(label) + '" aria-pressed="' + on + '" title="' +
+      (on ? "Stop tracking" : "Track") + " " + esc(label) + '">' +
+      (on ? "&#9733;" : "&#9734;") + "</button>";
+  }
+
+  function renderSaved() {
+    const of = pre => [...favs.keys()].filter(k => k.startsWith(pre)).map(k => k.slice(pre.length));
+    const teamRefs = of("team:").filter(t => teams[t]);
+    const playerRefs = of("player:");
+    if (!teamRefs.length && !playerRefs.length) {
+      return '<p class="note">Nothing tracked yet. Pick a team above and press ' +
+        "&#9734; Track, or star a player on the player-props tab. Whatever you " +
+        "star here shows up on every device you sign in on.</p>";
+    }
+    let html = "";
+    if (teamRefs.length) {
+      const rows = teamRefs
+        .map(t => ({ t: t, g: games.filter(x => x.home === t || x.away === t).find(x => !played(x)) }))
+        .filter(r => r.g)
+        .sort((a, b) => a.g.date.localeCompare(b.g.date) || a.t.localeCompare(b.t));
+      html += section("saved-teams",
+        "Next game" + (rows.length === 1 ? "" : "s") +
+        ' <span class="count">' + teamRefs.length + "</span>",
+        '<div class="games">' + rows.map(r => gameRow(r.g, r.t)).join("") + "</div>", true);
+    }
+    if (playerRefs.length && DATA.props) {
+      const want = new Set(playerRefs);
+      const seen = new Set();
+      for (const st of DATA.props.stats) {
+        const pls = st.players.filter(pl => want.has(pl.player));
+        if (!pls.length) continue;
+        pls.forEach(pl => seen.add(pl.player));
+        const lo = Math.min(...pls.map(pl => pl.p10));
+        const hi = Math.max(...pls.map(pl => pl.p90));
+        html += section("saved-" + st.key,
+          st.label + ' <span class="count">' + pls.length + "</span>",
+          '<div class="games">' + pls.map(pl => propRow(pl, lo, hi)).join("") + "</div>", true);
+      }
+      // Projections only cover the leaders in each category, so a tracked
+      // player can simply have nothing this week. Say so rather than losing him.
+      const quiet = playerRefs.filter(n => !seen.has(n));
+      if (quiet.length) {
+        html += '<p class="note">No projection this week for ' +
+          quiet.map(n => esc(favs.get("player:" + n) || n)).join(", ") +
+          " &mdash; the props tab only carries the leaders in each category.</p>";
+      }
+    } else if (playerRefs.length) {
+      html += '<p class="note">Player projections are not published yet this week.</p>';
+    }
+    return html;
+  }
+
   function render() {
     const main = document.getElementById("main");
     main.innerHTML = view === "props" && DATA.props ? renderProps()
       : view === "qb" && DATA.qb ? renderQb()
+      : view === "saved" ? renderSaved()
       : selected ? renderTeam(selected) : renderWeek(curWeek);
     if (view === "games" && !selected) {
       const prev = document.getElementById("prevWk"), next = document.getElementById("nextWk");
@@ -1322,6 +1631,7 @@
     document.getElementById("allBtn").setAttribute("aria-pressed", String(view === "games" && selected === null));
     document.getElementById("propsBtn").setAttribute("aria-pressed", String(view === "props"));
     document.getElementById("qbBtn").setAttribute("aria-pressed", String(view === "qb"));
+    document.getElementById("savedBtn").setAttribute("aria-pressed", String(view === "saved"));
   }
 
   const byConf = { AFC: [], NFC: [] };
@@ -1373,14 +1683,12 @@
   const gameIndex = {};
   games.forEach(g => { gameIndex[gid(g)] = g; });
 
-  function showModal(g) {
+  function modal(title, inner) {
     const bg = document.createElement("div");
     bg.className = "modal-bg";
     bg.innerHTML = '<div class="modal-card" role="dialog" aria-modal="true">' +
       '<button class="modal-close" aria-label="Close">&times;</button>' +
-      '<div class="modal-title display">' + g.away + " @ " + g.home +
-      " &mdash; Week " + g.week + ", " + fmtDate(g.date) + "</div>" +
-      whyModal(g) + "</div>";
+      '<div class="modal-title display">' + title + "</div>" + inner + "</div>";
     document.body.appendChild(bg);
     const close = () => { bg.remove(); document.removeEventListener("keydown", esc); };
     function esc(e) { if (e.key === "Escape") close(); }
@@ -1389,9 +1697,21 @@
     });
     document.addEventListener("keydown", esc);
     bg.querySelector(".modal-close").focus();
+    return bg;
+  }
+
+  function showModal(g) {
+    modal(g.away + " @ " + g.home + " &mdash; Week " + g.week + ", " + fmtDate(g.date),
+      whyModal(g));
   }
 
   function toggleGame(e) {
+    const star = e.target.closest("[data-track]");
+    if (star) {
+      e.stopPropagation();
+      toggleFav(star.dataset.track, star.dataset.ref, star.dataset.label);
+      return;
+    }
     // QB tab controls: scope, entity, column sort, playoff sort
     const ctl = e.target.closest("[data-qbscope],[data-qbent],[data-qbsort],[data-posort]");
     if (ctl) {
@@ -1473,5 +1793,28 @@
   mainEl.addEventListener("keydown", e => {
     if (e.key === "Enter" || e.key === " ") { e.preventDefault(); toggleGame(e); }
   });
+
+  document.getElementById("savedBtn").onclick = () => {
+    view = "saved"; selected = null; render();
+  };
+  document.getElementById("authBtn").onclick = async () => {
+    if (!session) { showSignIn(); return; }
+    const tok = await accessToken();
+    if (tok) {
+      // Best effort: revoke the refresh token server-side, then forget it here
+      // whether or not the call lands.
+      fetch(SB_URL + "/auth/v1/logout?scope=local", {
+        method: "POST",
+        headers: { apikey: SB_KEY, Authorization: "Bearer " + tok },
+      }).catch(() => {});
+    }
+    signOutLocal();
+    if (view === "saved") view = "games";
+    authRender();
+    render();
+    toast("Signed out.");
+  };
+
   render();
+  authBoot();
 </script>
