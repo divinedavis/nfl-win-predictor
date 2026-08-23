@@ -162,6 +162,26 @@
   /* The option list is drawn by the OS, so it needs the page colors spelled out. */
   .team-select option, .team-select optgroup { background: var(--surface); color: var(--ink); }
 
+  .propbar { gap: 8px; }
+  .search {
+    flex: 1 1 220px; min-width: 0;
+    border: 1px solid var(--line);
+    background: var(--surface);
+    color: var(--ink);
+    border-radius: 6px;
+    padding: 7px 10px;
+    font-family: system-ui, sans-serif;
+    font-size: 0.9rem;
+  }
+  .search::placeholder { color: var(--muted); }
+  .search:focus-visible { outline: 2px solid var(--field); outline-offset: 1px; border-color: var(--field); }
+  .section .count {
+    font-family: system-ui, sans-serif; font-size: 0.72rem; font-weight: 600;
+    color: var(--muted); background: var(--track);
+    border-radius: 999px; padding: 1px 7px; margin-left: 4px;
+    vertical-align: middle;
+  }
+
   .hero {
     margin: 24px 0 8px;
     background: var(--surface);
@@ -571,8 +591,9 @@
 
   // Collapsible sections — state survives re-renders.
   const collapsedSecs = new Set();
-  function section(key, title, inner) {
-    const closed = collapsedSecs.has(key);
+  if (DATA.props) DATA.props.stats.forEach(st => collapsedSecs.add("props-" + st.key));
+  function section(key, title, inner, forceOpen) {
+    const closed = !forceOpen && collapsedSecs.has(key);
     return '<h2 class="section sec-toggle" data-sec="' + key +
       '" role="button" tabindex="0" aria-expanded="' + !closed + '">' +
       '<span class="caret">' + (closed ? "&#9656;" : "&#9662;") + "</span> " +
@@ -917,32 +938,40 @@
       '<div class="val">' + p.p50 + '</div></div>';
   }
 
+  // Every prop category starts closed: eleven stat groups of thirty-odd
+  // players each is a wall of numbers, and almost nobody wants all of it.
+  let propQuery = "", propFocus = false;
+
   function renderProps() {
     const P = DATA.props;
-    const paper = P.paper;
-    let sub;
-    if (paper && paper.wins + paper.losses > 0) {
-      const n = paper.wins + paper.losses, wr = (100 * paper.wins / n).toFixed(1);
-      sub = "Paper record " + paper.wins + "&ndash;" + paper.losses + " (" + wr +
-        "%, breakeven 53.3%)" + (paper.roi !== null ? ", flat-stake ROI " + paper.roi + "%" : "") +
-        (paper.open ? ", " + paper.open + " picks open" : "") +
-        ". No real money unless this clears breakeven over 200+ picks.";
-    } else if (paper && paper.open) {
-      sub = paper.open + " paper picks logged, none settled yet. No real money " +
-        "unless the record clears 53.3% over 200+ picks.";
-    } else {
-      sub = "Projections only &mdash; no sportsbook lines pulled yet. When lines flow, " +
-        "edges are logged as $0 paper picks first; nothing real is staked unless the " +
-        "record clears the 53.3% breakeven over 200+ picks.";
+    const q = propQuery.trim().toLowerCase();
+    const hit = pl => !q ||
+      (pl.player + " " + pl.pos + " " + pl.team + " " + pl.opp).toLowerCase().includes(q);
+
+    let html = '<div class="controls propbar">' +
+      '<input id="propSearch" class="search" type="search" autocomplete="off" ' +
+      'placeholder="Search a player, team, or position" aria-label="Search player props" ' +
+      'value="' + esc(propQuery) + '">' +
+      '<button class="chip all" id="expandAll">Expand all</button>' +
+      '<button class="chip all" id="collapseAll">Collapse all</button></div>';
+
+    let shown = 0;
+    for (const st of P.stats) {
+      const players = st.players.filter(hit);
+      if (!players.length) continue;
+      shown += players.length;
+      // The bars are scaled to whatever is on screen, so a filtered list
+      // rescales to its own range rather than to the whole category.
+      const lo = Math.min(...players.map(pl => pl.p10));
+      const hi = Math.max(...players.map(pl => pl.p90));
+      html += section("props-" + st.key,
+        st.label + ' <span class="count">' + players.length + "</span>",
+        '<div class="games">' + players.map(pl => propRow(pl, lo, hi)).join("") + "</div>",
+        q !== "");
     }
-    let html = '<div class="hero"><div class="eyebrow">Player props &mdash; paper trading</div>' +
-      '<div class="matchup">Week ' + P.week + " projections</div>" +
-      '<div class="sub">' + sub + "</div></div>";
-    for (const s of P.stats) {
-      const lo = Math.min(...s.players.map(p => p.p10));
-      const hi = Math.max(...s.players.map(p => p.p90));
-      html += section("props-" + s.key, s.label,
-        '<div class="games">' + s.players.map(p => propRow(p, lo, hi)).join("") + "</div>");
+    if (!shown) {
+      return html + '<p class="note">Nothing matches &ldquo;' + esc(propQuery.trim()) +
+        "&rdquo; in this week&rsquo;s projections.</p>";
     }
     html += '<div class="legend"><span><span class="dot" style="background:var(--field-soft)"></span>80% range (P10&ndash;P90)</span>' +
       '<span><span class="dot" style="background:var(--field);opacity:.45"></span>middle 50%</span>' +
@@ -1167,32 +1196,9 @@
 
   function renderQb() {
     const Q = DATA.qb;
-    const L = {};
-    Q.league.forEach(r => { L[r.key] = r; });
-    const sw = Q.swing, P = Q.playoffs, T = P.tests.all || {};
-    const q4Gap = L.q4.epaDb - L.early.epaDb;
-    const cl = sw.clutchVsEarlyClose, lt = sw.lateVsEarly;
-    const real = cl.p < 0.05;
+    const P = Q.playoffs, T = P.tests.all || {};
 
-    let html = '<div class="hero"><div class="eyebrow">Fourth quarter &amp; ' +
-      'under five minutes &mdash; ' + Q.window[0] + "&ndash;" + Q.window[1] + "</div>" +
-      '<div class="matchup">' + (real
-        ? "Passers really do fall off late"
-        : "The late-game drop is the situation, not the passer") + "</div>" +
-      '<div class="sub">League-wide, quarterback play is worth ' + sgn(L.q4.epaDb, 3) +
-      " EPA per dropback in the fourth quarter against " + sgn(L.early.epaDb, 3) +
-      " in the first three &mdash; a " + Math.abs(q4Gap).toFixed(3) +
-      " drop, with completions falling from " + L.early.comp.toFixed(1) + "% to " +
-      L.q4.comp.toFixed(1) + "% and interceptions rising from " + L.early["int"].toFixed(1) +
-      "% to " + L.q4["int"].toFixed(1) + "%. But most of that is score-chasing: " +
-      "trailing teams throw into defenses playing the clock. Comparing each of " +
-      cl.n + " qualified starter-seasons against himself in one-score situations, " +
-      "the last five minutes come out " + sgn(cl.mean, 3) + " EPA per dropback " +
-      "against everything earlier (" + cl.worse + " of " + cl.n + " worse, p = " +
-      cl.p.toFixed(2) + ") &mdash; " + (real ? "a real gap." : "no measurable gap.") +
-      "</div>" +
-      '<div class="bignum">' + sgn(cl.mean, 3) +
-      ' <small>EPA per dropback, one-score football under 5:00 vs earlier</small></div></div>';
+    let html = "";
 
     const scopeChips = Q.scopes.map(sc => '<button class="chip all" data-qbscope="' +
       sc + '" aria-pressed="' + (qbScope === sc) + '">' +
@@ -1286,6 +1292,20 @@
       const prev = document.getElementById("prevWk"), next = document.getElementById("nextWk");
       if (prev) prev.onclick = () => { curWeek -= 1; render(); };
       if (next) next.onclick = () => { curWeek += 1; render(); };
+    }
+    if (view === "props" && DATA.props) {
+      const box = document.getElementById("propSearch");
+      if (box) {
+        box.oninput = () => { propQuery = box.value; propFocus = true; render(); };
+        // Re-rendering replaces the input, so typing has to be handed its
+        // focus and caret back or every keystroke would drop the keyboard.
+        if (propFocus) { box.focus(); box.setSelectionRange(box.value.length, box.value.length); }
+      }
+      const keys = DATA.props.stats.map(st => "props-" + st.key);
+      const ex = document.getElementById("expandAll");
+      if (ex) ex.onclick = () => { keys.forEach(k => collapsedSecs.delete(k)); render(); };
+      const co = document.getElementById("collapseAll");
+      if (co) co.onclick = () => { keys.forEach(k => collapsedSecs.add(k)); render(); };
     }
     for (const confName of ["AFC", "NFC"]) {
       const key = confName.toLowerCase();
