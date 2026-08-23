@@ -131,6 +131,37 @@
   }
   .chip.all { font-family: system-ui, sans-serif; font-size: 0.8rem; }
 
+  /* Conference dropdowns: 32 chips did not fit a phone without wrapping into
+     five rows, so each conference is one <select> grouped by division. */
+  .sel-row { display: flex; flex-wrap: wrap; gap: 8px 12px; margin-bottom: 10px; }
+  .sel-group { display: flex; align-items: center; gap: 7px; flex: 1 1 210px; }
+  .sel-wrap { position: relative; flex: 1 1 auto; min-width: 0; }
+  .sel-wrap::after {
+    content: ""; position: absolute; right: 11px; top: 50%;
+    width: 6px; height: 6px; pointer-events: none;
+    border-right: 2px solid var(--muted); border-bottom: 2px solid var(--muted);
+    transform: translateY(-70%) rotate(45deg);
+  }
+  .sel-wrap.active::after { border-color: #fff; }
+  .team-select {
+    width: 100%;
+    -webkit-appearance: none; appearance: none;
+    border: 1px solid var(--line);
+    background: var(--surface);
+    color: var(--ink);
+    border-radius: 6px;
+    padding: 7px 28px 7px 9px;
+    font-family: "Avenir Next Condensed", "Arial Narrow", system-ui, sans-serif;
+    font-size: 0.92rem;
+    font-weight: 600;
+    cursor: pointer;
+  }
+  .team-select:hover { border-color: var(--field); }
+  .team-select:focus-visible { outline: 2px solid var(--field); outline-offset: 1px; }
+  .team-select.active { background: var(--field); border-color: var(--field); color: #fff; }
+  /* The option list is drawn by the OS, so it needs the page colors spelled out. */
+  .team-select option, .team-select optgroup { background: var(--surface); color: var(--ink); }
+
   .hero {
     margin: 24px 0 8px;
     background: var(--surface);
@@ -421,13 +452,19 @@
 
   <div class="picker">
     <div class="picker-label">Pick your team</div>
-    <div class="conf-row">
-      <span class="conf-tag">AFC</span>
-      <div class="chips" id="afcChips"></div>
-    </div>
-    <div class="conf-row">
-      <span class="conf-tag">NFC</span>
-      <div class="chips" id="nfcChips"></div>
+    <div class="sel-row">
+      <div class="sel-group">
+        <label class="conf-tag" for="afcSel">AFC</label>
+        <div class="sel-wrap" id="afcWrap">
+          <select class="team-select" id="afcSel" aria-label="Filter by AFC team"></select>
+        </div>
+      </div>
+      <div class="sel-group">
+        <label class="conf-tag" for="nfcSel">NFC</label>
+        <div class="sel-wrap" id="nfcWrap">
+          <select class="team-select" id="nfcSel" aria-label="Filter by NFC team"></select>
+        </div>
+      </div>
     </div>
     <div class="conf-row">
       <span class="conf-tag"></span>
@@ -1250,8 +1287,15 @@
       if (prev) prev.onclick = () => { curWeek -= 1; render(); };
       if (next) next.onclick = () => { curWeek += 1; render(); };
     }
-    document.querySelectorAll(".chip[data-team]").forEach(b =>
-      b.setAttribute("aria-pressed", String(view === "games" && b.dataset.team === selected)));
+    for (const confName of ["AFC", "NFC"]) {
+      const key = confName.toLowerCase();
+      const mine = view === "games" && selected &&
+        teams[selected] && teams[selected].division.startsWith(confName);
+      const sel = document.getElementById(key + "Sel");
+      sel.value = mine ? selected : "";
+      sel.classList.toggle("active", !!mine);
+      document.getElementById(key + "Wrap").classList.toggle("active", !!mine);
+    }
     document.getElementById("allBtn").setAttribute("aria-pressed", String(view === "games" && selected === null));
     document.getElementById("propsBtn").setAttribute("aria-pressed", String(view === "props"));
     document.getElementById("qbBtn").setAttribute("aria-pressed", String(view === "qb"));
@@ -1259,20 +1303,34 @@
 
   const byConf = { AFC: [], NFC: [] };
   Object.entries(teams).forEach(([abbr, t]) => byConf[t.division.split(" ")[0]].push(abbr));
+  const DIV_ORDER = ["East", "North", "South", "West"];
   for (const confName of ["AFC", "NFC"]) {
-    const el = document.getElementById(confName.toLowerCase() + "Chips");
-    byConf[confName]
-      .sort((a, b) => teams[a].division.localeCompare(teams[b].division) || a.localeCompare(b))
-      .forEach(abbr => {
-        const b = document.createElement("button");
-        b.className = "chip";
-        b.dataset.team = abbr;
-        b.textContent = abbr;
-        b.title = teams[abbr].name + " · " + teams[abbr].division;
-        b.setAttribute("aria-pressed", "false");
-        b.onclick = () => { view = "games"; selected = selected === abbr ? null : abbr; render(); };
-        el.appendChild(b);
+    const sel = document.getElementById(confName.toLowerCase() + "Sel");
+    const placeholder = document.createElement("option");
+    placeholder.value = "";
+    placeholder.textContent = "All " + confName + " teams";
+    sel.appendChild(placeholder);
+    const divs = {};
+    byConf[confName].forEach(abbr => {
+      (divs[teams[abbr].division] = divs[teams[abbr].division] || []).push(abbr);
+    });
+    Object.keys(divs)
+      .sort((a, b) => DIV_ORDER.indexOf(a.split(" ")[1]) - DIV_ORDER.indexOf(b.split(" ")[1]))
+      .forEach(div => {
+        const og = document.createElement("optgroup");
+        og.label = div;
+        divs[div]
+          .sort((a, b) => teams[a].name.localeCompare(teams[b].name))
+          .forEach(abbr => {
+            const o = document.createElement("option");
+            o.value = abbr;
+            o.textContent = teams[abbr].name + " (" + abbr + ")";
+            og.appendChild(o);
+          });
+        sel.appendChild(og);
       });
+    // Picking in one conference clears the other, so only one team is ever on.
+    sel.onchange = () => { view = "games"; selected = sel.value || null; render(); };
   }
   document.getElementById("allBtn").onclick = () => { view = "games"; selected = null; render(); };
   const qbBtn = document.getElementById("qbBtn");
