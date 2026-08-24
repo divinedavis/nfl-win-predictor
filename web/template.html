@@ -201,6 +201,43 @@
     z-index: 50; max-width: 90vw;
   }
 
+  /* Pick controls sit on their own full-width line inside a game or prop
+     row, so neither grid has to grow a column. */
+  .pickrow {
+    grid-column: 1 / -1;
+    display: flex; flex-wrap: wrap; align-items: center; gap: 6px;
+    margin-top: 8px; padding-top: 8px; border-top: 1px dashed var(--line);
+    font-size: 0.82rem; color: var(--muted);
+  }
+  .pickbtn {
+    border: 1px solid var(--line); background: var(--surface); color: var(--ink);
+    border-radius: 6px; padding: 4px 11px; cursor: pointer;
+    font-family: system-ui, sans-serif; font-size: 0.82rem; font-weight: 600;
+  }
+  .pickbtn:hover { border-color: var(--field); }
+  .pickbtn:focus-visible { outline: 2px solid var(--field); outline-offset: 1px; }
+  .pickbtn[aria-pressed="true"] { background: var(--field); border-color: var(--field); color: #fff; }
+  .pickrow .lbl { text-transform: none; letter-spacing: 0; font-weight: 500; }
+
+  .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 10px; margin: 14px 0; }
+  .tile {
+    background: var(--surface); border: 1px solid var(--line);
+    border-radius: 8px; padding: 12px 14px;
+  }
+  .tile .big { font-family: "Avenir Next Condensed", "Arial Narrow", system-ui, sans-serif;
+               font-size: 1.7rem; font-weight: 700; line-height: 1.1; }
+  .tile .cap { color: var(--muted); font-size: 0.78rem; margin-top: 3px; }
+
+  .board { width: 100%; border-collapse: collapse; font-size: 0.9rem; }
+  .board th, .board td { padding: 7px 8px; border-bottom: 1px solid var(--line); text-align: right; }
+  .board th:first-child, .board td:first-child { text-align: left; }
+  .board th { color: var(--muted); font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.08em; font-weight: 600; }
+  .board tr.me td { background: var(--field-soft); font-weight: 700; }
+  .board .rank { color: var(--muted); width: 28px; }
+
+  .sharebar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 12px 0; }
+  .sharebar input.name { max-width: 190px; }
+
   .propbar { gap: 8px; }
   .search {
     flex: 1 1 220px; min-width: 0;
@@ -528,7 +565,7 @@
     </div>
     <div class="conf-row">
       <span class="conf-tag"></span>
-      <div class="chips"><button class="chip all" id="allBtn" aria-pressed="true">All games, week by week</button><button class="chip all" id="qbBtn" aria-pressed="false" hidden>QB grades by quarter</button><button class="chip all" id="propsBtn" aria-pressed="false" hidden>Player props</button><button class="chip all" id="savedBtn" aria-pressed="false" hidden>My tracking</button></div>
+      <div class="chips"><button class="chip all" id="allBtn" aria-pressed="true">All games, week by week</button><button class="chip all" id="qbBtn" aria-pressed="false" hidden>QB grades by quarter</button><button class="chip all" id="propsBtn" aria-pressed="false" hidden>Player props</button><button class="chip all" id="savedBtn" aria-pressed="false" hidden>My tracking</button><button class="chip all" id="picksBtn" aria-pressed="false" hidden>My picks</button><button class="chip all" id="boardBtn" aria-pressed="false" hidden>Leaderboard</button></div>
     </div>
   </div>
 
@@ -886,7 +923,7 @@
       '</div><div class="who">' + who + result + "</div>" +
       meter(perspective ? p : conf(g), perspective ? isDog : false) +
       '<div class="pct">' + (starred ? '<span class="star">★</span> ' : "") + pctLabel + "</div>" +
-      (open ? inlinePanel(g) : "") + "</div>";
+      gamePickStrip(g) + (open ? inlinePanel(g) : "") + "</div>";
   }
 
   function renderTeam(team) {
@@ -957,7 +994,7 @@
   }
 
   // ---- player props view ----
-  function propRow(p, lo, hi) {
+  function propRow(p, lo, hi, statKey, week) {
     const span = Math.max(hi - lo, 1e-6);
     const x = v => Math.min(100, Math.max(0, (v - lo) / span * 100));
     const band = (a, b, cls) => '<div class="' + cls + '" style="left:' +
@@ -982,7 +1019,8 @@
       '<div class="rng" role="img" aria-label="80% range ' + p.p10 + " to " + p.p90 + '">' +
       band(p.p10, p.p90, "band80") + band(p.p25, p.p75, "band50") +
       '<div class="med" style="left:' + x(p.p50).toFixed(1) + '%"></div></div>' +
-      '<div class="val">' + p.p50 + '</div></div>';
+      '<div class="val">' + p.p50 + "</div>" +
+      (statKey ? propPickStrip(p, week, statKey) : "") + "</div>";
   }
 
   // Every prop category starts closed: eleven stat groups of thirty-odd
@@ -1016,7 +1054,8 @@
       const hi = Math.max(...players.map(pl => pl.p90));
       html += section("props-" + st.key,
         st.label + ' <span class="count">' + players.length + "</span>",
-        '<div class="games">' + players.map(pl => propRow(pl, lo, hi)).join("") + "</div>",
+        '<div class="games">' +
+        players.map(pl => propRow(pl, lo, hi, st.key, P.week)).join("") + "</div>",
         q !== "");
     }
     if (!shown) {
@@ -1479,6 +1518,133 @@
     }
   }
 
+  // ---- picks -----------------------------------------------------------
+  // Two kinds: who wins a game, and whether a player clears the projection.
+  // A pick is graded against results Postgres holds, not against anything the
+  // browser could edit — see supabase/migrations/0003. The page grades its own
+  // rows locally from the same data so the badges appear without a round trip.
+  let picks = new Map();           // "kind:season:week:ref" -> {choice, line}
+  let profile = null;              // {display_name, share_id, is_public}
+  let board = null;                // leaderboard rows, loaded on demand
+  let sharedCard = null;           // someone else's card, from ?u=
+
+  const STAT_NAMES = {};
+  ((DATA.props || {}).stats || []).forEach(st => { STAT_NAMES[st.key] = st.label; });
+
+  const gref = g => g.away + "@" + g.home;
+  const pkey = (kind, week, ref) => kind + ":" + DATA.season + ":" + week + ":" + ref;
+  const getPick = (kind, week, ref) => picks.get(pkey(kind, week, ref));
+
+  // A game is closed once it kicks off. `kick` is a real instant, so this is
+  // right in every time zone; the date-only fallback covers a schedule row
+  // that has no time yet.
+  function lockedGame(g) {
+    if (played(g)) return true;
+    if (g.kick) return Date.parse(g.kick) <= Date.now();
+    return new Date(g.date + "T23:59:59") < new Date();
+  }
+
+  // A prop closes when its player's game does.
+  function propGame(pl, week) {
+    return games.find(g => g.week === week && (g.home === pl.team || g.away === pl.team));
+  }
+
+  async function loadPicks() {
+    const rows = await rest("picks?select=season,week,kind,ref,choice,line,label");
+    picks = new Map((rows || [])
+      .filter(r => r.season === DATA.season)
+      .map(r => [r.kind + ":" + r.season + ":" + r.week + ":" + r.ref,
+                 { choice: r.choice, label: r.label,
+                   line: r.line === null ? null : Number(r.line) }]));
+  }
+
+  async function loadProfile() {
+    const rows = await rest("profiles?select=display_name,share_id,is_public");
+    profile = (rows || [])[0] || null;
+  }
+
+  async function setPick(kind, week, ref, choice, line, label) {
+    if (!session) { showSignIn(); return; }
+    const key = pkey(kind, week, ref);
+    const had = picks.get(key);
+    const same = had && had.choice === choice;
+    const prev = had ? Object.assign({}, had) : null;
+    if (same) picks.delete(key);
+    else picks.set(key, { choice: choice, line: line, label: label || (had && had.label) });
+    render();
+    try {
+      if (same) {
+        await rest("picks?season=eq." + DATA.season + "&week=eq." + week +
+                   "&kind=eq." + encodeURIComponent(kind) +
+                   "&ref=eq." + encodeURIComponent(ref), { method: "DELETE" });
+      } else {
+        await rest("picks?on_conflict=user_id,season,week,kind,ref", {
+          method: "POST",
+          headers: { Prefer: "resolution=merge-duplicates,return=minimal" },
+          body: [{ user_id: session.user.id, season: DATA.season, week: week,
+                   kind: kind, ref: ref, choice: choice, label: label || null,
+                   line: line === undefined ? null : line }],
+        });
+      }
+    } catch (e) {
+      if (prev) picks.set(key, prev); else picks.delete(key);
+      render();
+      toast("Could not save that pick — try again in a moment.");
+    }
+  }
+
+  // null = not settled yet, true/false = won/lost, "push" = landed on the number
+  function gradePick(kind, week, ref, choice, line) {
+    if (kind === "game") {
+      const g = games.find(x => x.week === week && gref(x) === ref);
+      if (!g || !played(g)) return null;
+      if (g.homeScore === g.awayScore) return "push";
+      return choice === winner(g);
+    }
+    const R = (DATA.props || {}).results || {};
+    const actual = R[week + "|" + ref];
+    if (actual === undefined || actual === null || line === null) return null;
+    if (actual === line) return "push";
+    return (choice === "over") === (actual > line);
+  }
+
+  function pickStrip(kind, week, ref, options, hint, line, closed, label) {
+    if (!SB_PROVIDERS.length) return "";
+    const mine = getPick(kind, week, ref);
+    if (closed && !mine) return "";
+    if (closed) {
+      const verdict = gradePick(kind, week, ref, mine.choice, mine.line);
+      const shown = options.find(o => o.value === mine.choice);
+      const badge = verdict === null ? '<span class="sub">not settled yet</span>'
+        : verdict === "push" ? '<span class="badge">PUSH</span>'
+        : '<span class="badge ' + (verdict ? "hit" : "miss") + '">' +
+          (verdict ? "WON" : "LOST") + "</span>";
+      return '<div class="pickrow"><span class="lbl">Your pick:</span> <b>' +
+        esc(shown ? shown.label : mine.choice) + "</b> " + badge + "</div>";
+    }
+    return '<div class="pickrow">' + options.map(o =>
+      '<button class="pickbtn" data-pick="' + kind + '" data-week="' + week +
+      '" data-ref="' + esc(ref) + '" data-choice="' + esc(o.value) + '"' +
+      (line === undefined || line === null ? "" : ' data-line="' + line + '"') +
+      (label ? ' data-label="' + esc(label) + '"' : "") +
+      ' aria-pressed="' + (!!mine && mine.choice === o.value) + '">' +
+      esc(o.label) + "</button>").join("") +
+      '<span class="lbl">' + hint + "</span></div>";
+  }
+
+  const gamePickStrip = g => pickStrip("game", g.week, gref(g),
+    [{ value: g.away, label: g.away }, { value: g.home, label: g.home }],
+    "who wins?", null, lockedGame(g),
+    teams[g.away].name + " at " + teams[g.home].name);
+
+  function propPickStrip(pl, week, statKey) {
+    const g = propGame(pl, week);
+    return pickStrip("prop", week, pl.pid + "|" + statKey,
+      [{ value: "over", label: "Over" }, { value: "under", label: "Under" }],
+      "of " + pl.p50, pl.p50, !!g && lockedGame(g),
+      pl.player + " · " + STAT_NAMES[statKey]);
+  }
+
   function showSignIn() {
     const G = '<svg viewBox="0 0 48 48" aria-hidden="true">' +
       '<path fill="#EA4335" d="M24 9.5c3.5 0 6.6 1.2 9 3.6l6.7-6.7C35.6 2.6 30.2.5 24 .5 14.6.5 6.5 5.8 2.6 13.6l7.8 6.1C12.3 13.6 17.6 9.5 24 9.5z"/>' +
@@ -1511,6 +1677,9 @@
       ? "Signed in as " + session.user.email : "Save the teams and players you follow";
     const saved = document.getElementById("savedBtn");
     saved.hidden = !session;
+    document.getElementById("picksBtn").hidden = !session;
+    // The leaderboard is public: anyone can look, signed in or not.
+    document.getElementById("boardBtn").hidden = SB_PROVIDERS.length === 0;
   }
 
   // Finish a redirect back from the provider, or restore a stored session.
@@ -1536,9 +1705,27 @@
       if (stored && stored.refresh_token) session = stored;
     }
     if (session) {
-      try { await loadFavs(); } catch (e) { signOutLocal(); }
+      try {
+        await loadFavs();
+        await loadPicks();
+        await loadProfile();
+      } catch (e) { signOutLocal(); }
     }
     authRender();
+    render();
+  }
+
+  // A shared card is a public read: it works signed out, and it does not
+  // disturb whatever the visitor was doing before they followed the link.
+  async function openShared(shareId) {
+    view = "shared";
+    render();
+    try {
+      const rows = await publicRpc("shared_card", { share: shareId });
+      sharedCard = rows && rows.length ? rows[0] : "missing";
+    } catch (e) {
+      sharedCard = "missing";
+    }
     render();
   }
 
@@ -1551,6 +1738,186 @@
       '" data-label="' + esc(label) + '" aria-pressed="' + on + '" title="' +
       (on ? "Stop tracking" : "Track") + " " + esc(label) + '">' +
       (on ? "&#9733;" : "&#9734;") + "</button>";
+  }
+
+  // ---- my picks, the leaderboard, and a shared card --------------------
+  // A call the page can make signed out — the leaderboard and a shared card
+  // are public by design, and both are aggregates computed in Postgres.
+  async function publicRpc(name, body) {
+    const headers = { apikey: SB_KEY, "Content-Type": "application/json" };
+    const tok = session ? await accessToken() : null;
+    if (tok) headers.Authorization = "Bearer " + tok;
+    const r = await fetch(SB_URL + "/rest/v1/rpc/" + name, {
+      method: "POST", headers: headers, body: JSON.stringify(body || {}),
+    });
+    if (!r.ok) throw new Error("rpc " + name + " " + r.status);
+    return r.json();
+  }
+
+  function myPicks() {
+    return [...picks.entries()].map(([k, v]) => {
+      const bits = k.split(":");
+      const kind = bits[0], week = Number(bits[2]), ref = bits.slice(3).join(":");
+      return { kind: kind, week: week, ref: ref, choice: v.choice,
+               line: v.line, label: v.label,
+               verdict: gradePick(kind, week, ref, v.choice, v.line) };
+    }).sort((a, b) => b.week - a.week || a.kind.localeCompare(b.kind));
+  }
+
+  function tally(rows) {
+    const t = { gw: 0, gl: 0, pw: 0, pl: 0, pending: 0, push: 0 };
+    rows.forEach(r => {
+      if (r.verdict === null) t.pending += 1;
+      else if (r.verdict === "push") t.push += 1;
+      else if (r.kind === "game") r.verdict ? t.gw++ : t.gl++;
+      else r.verdict ? t.pw++ : t.pl++;
+    });
+    t.wins = t.gw + t.pw;
+    t.losses = t.gl + t.pl;
+    t.pct = t.wins + t.losses ? (100 * t.wins / (t.wins + t.losses)) : null;
+    return t;
+  }
+
+  const tile = (big, cap) => '<div class="tile"><div class="big">' + big +
+    '</div><div class="cap">' + cap + "</div></div>";
+
+  const verdictBadge = v => v === null ? '<span class="sub">pending</span>'
+    : v === "push" ? '<span class="badge">PUSH</span>'
+    : '<span class="badge ' + (v ? "hit" : "miss") + '">' + (v ? "WON" : "LOST") + "</span>";
+
+  // A pick made in week 3 outlives the payload it was made against, so the
+  // stored label is the primary source and the current week is only a
+  // fallback for rows written before labels existed.
+  function refLabel(r) {
+    if (r.label) return r.label;
+    if (r.kind === "game") {
+      const parts = r.ref.split("@");
+      return teams[parts[0]] && teams[parts[1]]
+        ? teams[parts[0]].name + " at " + teams[parts[1]].name : r.ref;
+    }
+    const bits = r.ref.split("|");
+    let name = null;
+    ((DATA.props || {}).stats || []).forEach(st => {
+      (st.players || []).forEach(pl => { if (pl.pid === bits[0]) name = pl.player; });
+    });
+    return (name || "Player") + " · " + (STAT_NAMES[bits[1]] || bits[1].replace(/_/g, " "));
+  }
+
+  function pickLine(r, whose) {
+    const verb = whose === "them" ? "took " : "you took ";
+    let what, took;
+    if (r.kind === "game") {
+      const g = games.find(x => x.week === r.week && gref(x) === r.ref);
+      what = refLabel(r);
+      took = verb + (teams[r.choice] ? teams[r.choice].name : r.choice);
+      if (g && played(g)) took += " &middot; final " + g.awayScore + "&ndash;" + g.homeScore;
+    } else {
+      what = refLabel(r);
+      took = (r.choice === "over" ? "Over " : "Under ") + r.line;
+      const actual = r.actual !== undefined && r.actual !== null ? r.actual
+        : ((DATA.props || {}).results || {})[r.week + "|" + r.ref];
+      if (actual !== undefined && actual !== null) took += " &middot; actual " + actual;
+    }
+    return '<div class="game"><div class="when">Wk ' + r.week + "</div>" +
+      '<div class="who"><span class="code">' + esc(what) + "</span>" +
+      '<div class="sub">' + took + "</div></div>" +
+      '<div class="pct">' + verdictBadge(r.verdict) + "</div></div>";
+  }
+
+  function renderPicks() {
+    if (!session) {
+      return '<p class="note">Sign in to start calling games and over/unders. ' +
+        "Your record is yours &mdash; nothing is staked, and nothing is public " +
+        "unless you put yourself on the leaderboard.</p>";
+    }
+    const rows = myPicks();
+    const t = tally(rows);
+    let html = '<div class="tiles">' +
+      tile(t.pct === null ? "&mdash;" : t.pct.toFixed(1) + "%",
+           "of settled picks correct" + (t.wins + t.losses ? " (" + t.wins + "&ndash;" + t.losses + ")" : "")) +
+      tile(t.gw + "&ndash;" + t.gl, "head-to-head games") +
+      tile(t.pw + "&ndash;" + t.pl, "over/unders") +
+      tile(t.pending, "waiting on results" + (t.push ? " &middot; " + t.push + " push" : "")) +
+      "</div>";
+
+    if (profile) {
+      html += '<div class="sharebar">' +
+        '<input class="search name" id="nameInput" maxlength="40" ' +
+        'aria-label="Name shown on the leaderboard" value="' + esc(profile.display_name) + '">' +
+        '<button class="chip all" id="saveName">Save name</button>' +
+        '<button class="chip all" id="copyShare">Copy share link</button>' +
+        '<button class="chip all" id="togglePublic" aria-pressed="' + !!profile.is_public + '">' +
+        (profile.is_public ? "On the leaderboard" : "Hidden from the leaderboard") +
+        "</button></div>" +
+        '<p class="note">The share link shows this name, your record and your ' +
+        "picks to anyone who opens it. Turning yourself off the leaderboard " +
+        "switches the link off too.</p>";
+    }
+
+    if (!rows.length) {
+      return html + '<p class="note">No picks yet. Every game row has two ' +
+        "buttons for who wins, and every player-prop row has Over and Under. " +
+        "Both lock at kickoff.</p>";
+    }
+    html += '<div class="games">' + rows.map(pickLine).join("") + "</div>";
+    return html;
+  }
+
+  function renderBoard() {
+    if (board === null) {
+      return '<p class="note">Loading the leaderboard&hellip;</p>';
+    }
+    if (!board.length) {
+      return '<p class="note">Nobody has a settled pick yet. The board fills in ' +
+        "once games are played &mdash; a pick has to be graded to count, and " +
+        "props that land exactly on the projection are pushes.</p>";
+    }
+    const mine = profile ? profile.display_name : null;
+    return '<div class="tablewrap"><table class="board"><thead><tr>' +
+      '<th class="rank">#</th><th>Name</th><th>W</th><th>L</th><th>Win %</th>' +
+      "<th>Games</th><th>Props</th></tr></thead><tbody>" +
+      board.map((r, i) => '<tr' + (mine && r.display_name === mine ? ' class="me"' : "") + ">" +
+        '<td class="rank">' + (i + 1) + "</td><td>" + esc(r.display_name) + "</td>" +
+        "<td>" + r.wins + "</td><td>" + r.losses + "</td>" +
+        "<td>" + (r.pct === null ? "&mdash;" : Number(r.pct).toFixed(1) + "%") + "</td>" +
+        "<td>" + r.game_wins + "&ndash;" + r.game_losses + "</td>" +
+        "<td>" + r.prop_wins + "&ndash;" + r.prop_losses + "</td></tr>").join("") +
+      "</tbody></table></div>" +
+      '<p class="note">Everyone with at least three settled picks who has not ' +
+      "hidden themselves. Records are counted in the database against published " +
+      "results, so what is on this board is not something a browser can edit.</p>";
+  }
+
+  function renderShared() {
+    if (sharedCard === "missing") {
+      return '<p class="note">That link does not point at anything &mdash; the ' +
+        "card may have been switched off.</p>";
+    }
+    if (!sharedCard) return '<p class="note">Loading&hellip;</p>';
+    const c = sharedCard;
+    const rows = (c.picks || []).map(r => {
+      const line = r.line === null ? null : Number(r.line);
+      const actual = r.actual === null || r.actual === undefined ? null : Number(r.actual);
+      // The function returns hit = null for a push as well as for a pending
+      // pick; the line and the actual tell the two apart.
+      const push = actual !== null && line !== null && actual === line;
+      return { kind: r.kind, week: r.week, ref: r.ref, choice: r.choice,
+               line: line, label: r.label, actual: actual,
+               verdict: push ? "push" : r.hit };
+    });
+    const pushes = rows.filter(r => r.verdict === "push").length;
+    return '<div class="tiles">' +
+      tile(esc(c.display_name), "picks on Gridiron Odds") +
+      tile(c.pct === null ? "&mdash;" : Number(c.pct).toFixed(1) + "%",
+           "of settled picks correct") +
+      tile(c.wins + "&ndash;" + c.losses, "won&ndash;lost") +
+      tile(c.pending - pushes, "waiting on results" +
+           (pushes ? " &middot; " + pushes + " push" : "")) + "</div>" +
+      (rows.length ? '<div class="games">' +
+        rows.map(r => pickLine(r, "them")).join("") + "</div>" : "") +
+      '<p class="note">Somebody else&rsquo;s card. Nothing is staked on any of ' +
+      'this &mdash; <a href="' + location.pathname + '">open the week&rsquo;s ' +
+      "predictions</a> to make your own calls.</p>";
   }
 
   function renderSaved() {
@@ -1584,7 +1951,8 @@
         const hi = Math.max(...pls.map(pl => pl.p90));
         html += section("saved-" + st.key,
           st.label + ' <span class="count">' + pls.length + "</span>",
-          '<div class="games">' + pls.map(pl => propRow(pl, lo, hi)).join("") + "</div>", true);
+          '<div class="games">' +
+          pls.map(pl => propRow(pl, lo, hi, st.key, DATA.props.week)).join("") + "</div>", true);
       }
       // Projections only cover the leaders in each category, so a tracked
       // player can simply have nothing this week. Say so rather than losing him.
@@ -1602,7 +1970,10 @@
 
   function render() {
     const main = document.getElementById("main");
-    main.innerHTML = view === "props" && DATA.props ? renderProps()
+    main.innerHTML = view === "shared" ? renderShared()
+      : view === "picks" ? renderPicks()
+      : view === "board" ? renderBoard()
+      : view === "props" && DATA.props ? renderProps()
       : view === "qb" && DATA.qb ? renderQb()
       : view === "saved" ? renderSaved()
       : selected ? renderTeam(selected) : renderWeek(curWeek);
@@ -1638,6 +2009,58 @@
     document.getElementById("propsBtn").setAttribute("aria-pressed", String(view === "props"));
     document.getElementById("qbBtn").setAttribute("aria-pressed", String(view === "qb"));
     document.getElementById("savedBtn").setAttribute("aria-pressed", String(view === "saved"));
+    document.getElementById("picksBtn").setAttribute("aria-pressed", String(view === "picks"));
+    document.getElementById("boardBtn").setAttribute("aria-pressed", String(view === "board"));
+    if (view === "picks" && profile) wireProfileControls();
+  }
+
+  function wireProfileControls() {
+    const nameBox = document.getElementById("nameInput");
+    const save = document.getElementById("saveName");
+    if (save) save.onclick = async () => {
+      const wanted = nameBox.value.trim().slice(0, 40);
+      if (!wanted || wanted === profile.display_name) return;
+      const before = profile.display_name;
+      profile.display_name = wanted;
+      try {
+        await rest("profiles?user_id=eq." + session.user.id,
+                   { method: "PATCH", body: { display_name: wanted } });
+        toast("Name updated.");
+      } catch (e) {
+        profile.display_name = before;
+        toast("Could not save that name.");
+      }
+      board = null;
+      render();
+    };
+    const pub = document.getElementById("togglePublic");
+    if (pub) pub.onclick = async () => {
+      const next = !profile.is_public;
+      profile.is_public = next;
+      render();
+      try {
+        await rest("profiles?user_id=eq." + session.user.id,
+                   { method: "PATCH", body: { is_public: next } });
+      } catch (e) {
+        profile.is_public = !next;
+        render();
+        toast("Could not change that.");
+      }
+      board = null;
+    };
+    const copy = document.getElementById("copyShare");
+    if (copy) copy.onclick = () => {
+      const link = location.origin + location.pathname + "?u=" + encodeURIComponent(profile.share_id);
+      // Clipboard access needs a secure context and a permission the viewer
+      // may refuse, so the link is always shown as well as copied.
+      const done = () => toast("Share link copied.");
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(link).then(done, () => modal("Your share link",
+          '<p class="fineprint">' + esc(link) + "</p>"));
+      } else {
+        modal("Your share link", '<p class="fineprint">' + esc(link) + "</p>");
+      }
+    };
   }
 
   const byConf = { AFC: [], NFC: [] };
@@ -1712,6 +2135,14 @@
   }
 
   function toggleGame(e) {
+    const pb = e.target.closest("[data-pick]");
+    if (pb) {
+      e.stopPropagation();
+      const d = pb.dataset;
+      setPick(d.pick, Number(d.week), d.ref, d.choice,
+              d.line === undefined ? null : Number(d.line), d.label);
+      return;
+    }
     const star = e.target.closest("[data-track]");
     if (star) {
       e.stopPropagation();
@@ -1803,6 +2234,19 @@
   document.getElementById("savedBtn").onclick = () => {
     view = "saved"; selected = null; render();
   };
+  document.getElementById("picksBtn").onclick = () => {
+    view = "picks"; selected = null; render();
+  };
+  document.getElementById("boardBtn").onclick = async () => {
+    view = "board"; selected = null; render();
+    try {
+      board = await publicRpc("leaderboard", { min_picks: 3, limit_n: 50 });
+    } catch (e) {
+      board = [];
+      toast("Could not load the leaderboard.");
+    }
+    render();
+  };
   document.getElementById("authBtn").onclick = async () => {
     if (!session) { showSignIn(); return; }
     const tok = await accessToken();
@@ -1822,5 +2266,6 @@
   };
 
   render();
-  authBoot();
+  const shareParam = new URL(location.href).searchParams.get("u");
+  authBoot().then(() => { if (shareParam) openShared(shareParam); });
 </script>

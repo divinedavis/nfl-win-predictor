@@ -32,6 +32,9 @@ LOG=refresh.log
   $PY diary.py --settle --record || echo "diary update failed (non-fatal)"
   $PY diary.py --report | tail -12 || true
   $PY export_web.py
+  # Results the picks page grades against. Runs after export_web.py because
+  # that is what appends this week's players to the projection log.
+  $PY publish_results.py || echo "results publish failed (non-fatal)"
   if [ -d /var/www/nfl ]; then
     cp web/index.html /var/www/nfl/index.html
     # Static, but copied every run so an edit in the repo cannot sit

@@ -5,8 +5,9 @@ template. Rerun weekly after features.py + train.py, then republish.
 """
 
 import json
-from datetime import date
+from datetime import date, datetime
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 import pandas as pd
 import nflreadpy as nfl
@@ -65,6 +66,53 @@ STAT_LABELS = {
 }
 
 
+PROJECTION_LOG = Path("props_projection_log.csv")
+
+
+def _log_projections(shown: pd.DataFrame) -> None:
+    """Remember every player-week the page has actually offered.
+
+    props_projections.csv is overwritten each week, so without this there
+    would be no way to grade an over/under a visitor picked three weeks ago —
+    the row it was made against is simply gone. Only the rows the page renders
+    go in: those are the only ones anyone can pick, and logging the full
+    projection table instead would put a quarter of a megabyte of results into
+    the payload by January."""
+    cols = ["season", "week", "stat", "player_id", "player"]
+    rows = shown[cols].drop_duplicates()
+    if PROJECTION_LOG.exists():
+        rows = pd.concat([pd.read_csv(PROJECTION_LOG), rows], ignore_index=True)
+    rows.drop_duplicates(cols).sort_values(cols).to_csv(PROJECTION_LOG, index=False)
+
+
+def _prop_results(season: int, week: int) -> dict:
+    """Actual totals for projected players in weeks already played, keyed
+    "week|player_id|stat". The page grades over/under picks against these."""
+    if not PROJECTION_LOG.exists():
+        return {}
+    log = pd.read_csv(PROJECTION_LOG)
+    log = log[(log["season"] == season) & (log["week"] < week)]
+    if log.empty:
+        return {}
+    try:
+        wk = (nfl.load_player_stats([season], summary_level="week")
+              .select(["season", "week", "player_id"] + list(STAT_LABELS))
+              .to_pandas())
+    except Exception:
+        return {}          # season not published yet
+    wk = wk[wk["week"] < week]
+    out = {}
+    for stat in STAT_LABELS:
+        want = log[log["stat"] == stat][["week", "player_id"]]
+        merged = want.merge(wk[["week", "player_id", stat]],
+                            on=["week", "player_id"], how="inner")
+        for r in merged.itertuples(index=False):
+            v = getattr(r, stat)
+            if pd.notna(v):
+                out[f"{int(r.week)}|{r.player_id}|{stat}"] = _f(v, 1)
+    return out
+
+
 def props_payload():
     """Player-prop projections + paper-trade record for the dashboard's
     props section; None (section hidden) until props.py has run."""
@@ -75,9 +123,14 @@ def props_payload():
     if proj.empty:
         return None
     stats = []
+    shown = []
     for stat, label in STAT_LABELS.items():
         d = proj[proj.stat == stat].nlargest(12, "p50")
+        shown.append(d)
         players = [{
+            # player_id is the stable handle a saved pick or favorite points
+            # at; display names drift between feeds and collide.
+            "pid": r.player_id,
             "player": r.player, "pos": r.position, "team": r.team,
             "opp": r.opp, "home": bool(r.is_home),
             "p10": r.p10, "p25": r.p25, "p50": r.p50,
@@ -109,8 +162,11 @@ def props_payload():
         paper = {"wins": wins, "losses": losses, "open": int(len(led) - len(done)),
                  "roi": roi}
 
-    return {"week": int(proj["week"].iloc[0]),
-            "season": int(proj["season"].iloc[0]),
+    _log_projections(pd.concat(shown, ignore_index=True))
+    cur_week, cur_season = int(proj["week"].iloc[0]), int(proj["season"].iloc[0])
+    return {"week": cur_week,
+            "season": cur_season,
+            "results": _prop_results(cur_season, cur_week),
             "stats": stats, "paper": paper}
 
 
@@ -290,6 +346,21 @@ def main() -> None:
         ranked = sorted(vals, key=vals.get, reverse=desc)
         rank_of[metric] = {t: i + 1 for i, t in enumerate(ranked)}
 
+    # Kickoff as a real instant. The payload has only carried the date, which
+    # is enough to print but not enough to decide whether a game has started —
+    # and picks have to lock at kickoff, in the visitor's own time zone.
+    ET = ZoneInfo("America/New_York")
+    kickoffs = {}
+    for r in sched_all[sched_all.season == LAST_SEASON].itertuples(index=False):
+        if not isinstance(r.gametime, str) or ":" not in r.gametime:
+            continue
+        hh, mm = r.gametime.split(":")[:2]
+        stamp = datetime.combine(pd.Timestamp(r.gameday).date(),
+                                 datetime.min.time(), tzinfo=ET)
+        stamp = stamp.replace(hour=int(hh), minute=int(mm))
+        kickoffs[(int(r.week), r.away_team, r.home_team)] = (
+            stamp.astimezone(ZoneInfo("UTC")).strftime("%Y-%m-%dT%H:%M:%SZ"))
+
     games = []
     for r in season.sort_values(["week", "gameday"]).itertuples(index=False):
         # Everything the "why this pick" panel cites, keyed H/A. Kept raw —
@@ -366,6 +437,7 @@ def main() -> None:
         games.append({
             "week": int(r.week),
             "date": pd.Timestamp(r.gameday).strftime("%Y-%m-%d"),
+            "kick": kickoffs.get((int(r.week), r.away_team, r.home_team)),
             "away": r.away_team,
             "home": r.home_team,
             "homeProb": round(float(r.home_prob), 3),
