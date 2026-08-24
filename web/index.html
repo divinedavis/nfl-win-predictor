@@ -1,7 +1,11 @@
 <meta charset="UTF-8">
-<title>Gridiron Odds</title>
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<!-- Link previews (iMessage/Slack/Twitter read Open Graph) -->
+<!-- Link previews (iMessage/Slack/Twitter read Open Graph). Everything between
+     the markers is rewritten per request by the sputter-og service for a
+     /s/<share_id> card, so a shared link previews as whose picks it is. Keep
+     the markers, and keep the block self-contained. -->
+<!--OG-->
+<title>Gridiron Odds</title>
 <meta property="og:type" content="website">
 <meta property="og:site_name" content="Gridiron Odds">
 <meta property="og:title" content="Gridiron Odds — NFL Win Probabilities">
@@ -13,6 +17,7 @@
 <meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:title" content="Gridiron Odds — NFL Win Probabilities">
 <meta name="twitter:image" content="https://sputterbets.com/og.jpg">
+<!--/OG-->
 <style>
   :root {
     --bg: #F5F4EF;
@@ -2095,7 +2100,7 @@
     };
     const copy = document.getElementById("copyShare");
     if (copy) copy.onclick = () => {
-      const link = location.origin + location.pathname + "?u=" + encodeURIComponent(profile.share_id);
+      const link = location.origin + "/s/" + encodeURIComponent(profile.share_id);
       // Clipboard access needs a secure context and a permission the viewer
       // may refuse, so the link is always shown as well as copied.
       const done = () => toast("Share link copied.");
@@ -2287,6 +2292,8 @@
   };
 
   render();
-  const shareParam = new URL(location.href).searchParams.get("u");
+  const prettyShare = location.pathname.match(/^\/s\/([A-Za-z0-9_-]{6,32})\/?$/);
+  const shareParam = prettyShare ? prettyShare[1]
+    : new URL(location.href).searchParams.get("u");
   authBoot().then(() => { if (shareParam) openShared(shareParam); });
 </script>

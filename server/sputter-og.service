@@ -1,0 +1,16 @@
+[Unit]
+Description=Open Graph renderer for sputterbets.com shared picks links
+After=network.target
+
+[Service]
+ExecStart=/usr/bin/python3 /opt/sputter-og/server.py
+User=www-data
+Restart=always
+RestartSec=2
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+
+[Install]
+WantedBy=multi-user.target
