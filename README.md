@@ -132,6 +132,7 @@ seasons. What has been tested so far —
 | Coaching + head-to-head matchup history | `coach_ablation.py` | Nothing beyond Elo; residual r=−0.17 |
 | Upset indicators (luck, sacks, blitz, travel, letdown) | `backtest_groups.py` | None promoted; two kept as display flags |
 | **2+ starting offensive linemen out** | `ol_ablation.py` | Real in raw numbers, already priced — see below |
+| Spread from preseason Vegas win totals (RJ's rule) | `wintotals_rule.py` | No edge — 50.3% ATS as stated, 51.3% at best fit; see below |
 
 The pattern: a feature wins only when it carries information Elo and rolling
 EPA could not already have absorbed through game results.
@@ -149,6 +150,41 @@ props pinball loss is flat to worse. `features.py` builds
 candidate group; neither is in `FEATURES`. The dashboard names a patched-up
 line as context, because linemen have no stat line and so never appear in the
 key-absence list.
+
+### Preseason win totals as a spread
+
+A rule of thumb passed along by a friend: take each team's preseason Vegas win
+total, multiply the gap by 5.5, add 1.75 for home field, and bet that number
+against the closing spread — claimed 58% over seven years. `build_win_totals.py`
+scrapes the totals (SportsOddsHistory, 2010–2025, plus a hand-entered current
+season in `win_totals_current.csv`) and `wintotals_rule.py` grades it.
+
+It does not hold up. As stated it went 50.3% over 4,203 bets (−3.9% ROI) and
+49.9% over the last seven seasons. The ×5.5 is the wrong scale: regressing
+actual margin on the win-total gap gives **1.76 points per win**, and the
+closing line already prices **1.60 points per win** — the market runs this rule
+with a better constant. Sweeping the multiplier across its whole range never
+clears the 52.4% breakeven (best 51.3%), and no edge filter rescues it.
+
+The one honest hint is early season: at ×1.75, weeks 1–4 hit 54.1% (n=958) and
+the edge decays monotonically to 47.9% by week 15 — the right shape for
+preseason information going stale as the market learns. It is not significant
+(p = 0.155) and it is weaker in the recent half (55.7% in 2010–17 vs 52.5% in
+2018–25), so it stays a note, not a bet.
+
+## Against the spread
+
+The dashboard shows an ATS lean next to every game. **It has no measured
+edge**: `ats_backtest.py` covers 50.4% over 2,943 games (2015–2025), above the
+52.4% breakeven in 3 of 11 seasons. The model's expected margin misses by 10.38
+points on average; the closing line misses by 10.08. The line is the better
+margin estimate, so a lean built by disagreeing with it loses to the juice.
+
+An earlier run of this same script recorded 55.2% (10/11 seasons) on
+2026-08-13. It does not reproduce under the current features, under the
+pre-`ab1cbb3` feature set, or with `features.parquet` rebuilt at the old
+`ELO_HFA=52`; a constant-offset sweep peaks at 51.3%, so it was not a
+home-field lean either. The number is withdrawn, on the site as well as here.
 
 ## Backtest (walk-forward, 2015–2025, 3,018 games)
 
