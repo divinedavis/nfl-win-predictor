@@ -77,18 +77,9 @@
 
   header { padding: 28px 0 18px; border-bottom: 3px solid var(--ink); }
   .masthead { display: flex; align-items: baseline; gap: 14px; flex-wrap: wrap; }
-  .masthead .how {
-    margin-left: auto;
-    font-family: "Avenir Next Condensed", "Arial Narrow", system-ui, sans-serif;
-    font-size: 0.82rem; text-transform: uppercase; letter-spacing: 0.09em;
-    color: var(--muted); text-decoration: none;
-    border: 1px solid var(--line); border-radius: 4px; padding: 5px 11px;
-    white-space: nowrap;
-  }
-  .masthead .how:hover, .masthead .how:focus-visible {
-    color: var(--field); border-color: var(--field);
-  }
-  @media (max-width: 520px) { .masthead .how { margin-left: 0; } }
+  /* The masthead buttons sit together on the right of the title. */
+  .masthead .authbtn:first-of-type { margin-left: auto; }
+  @media (max-width: 520px) { .masthead .authbtn:first-of-type { margin-left: 0; } }
   h1 {
     margin: 0;
     font-family: "Avenir Next Condensed", "Helvetica Neue Condensed",
@@ -418,6 +409,7 @@
     color: var(--muted); font-size: 0.82rem;
   }
   footer p { margin: 0 0 8px; max-width: 65ch; }
+  footer a { color: var(--field); }
   @media (max-width: 560px) {
     .game { grid-template-columns: 44px 1fr 72px; }
     .game .meter { display: none; }
@@ -536,7 +528,7 @@
     <div class="masthead">
       <h1>Gridiron Odds <span class="season" id="seasonLabel"></span></h1>
       <span class="tagline display" id="genLabel"></span>
-      <a class="how" href="how-it-works.html">How it works</a>
+      <button class="authbtn" id="myPicksBtn">My picks</button>
       <button class="authbtn" id="authBtn" hidden></button>
     </div>
   </header>
@@ -548,6 +540,14 @@
   </section>
 
   <div class="picker">
+    <div class="sel-row">
+      <div class="sel-group">
+        <label class="conf-tag" for="viewSel">Show</label>
+        <div class="sel-wrap" id="viewWrap">
+          <select class="team-select" id="viewSel" aria-label="Choose what to show"></select>
+        </div>
+      </div>
+    </div>
     <div class="picker-label">Pick your team</div>
     <div class="sel-row">
       <div class="sel-group">
@@ -562,10 +562,6 @@
           <select class="team-select" id="nfcSel" aria-label="Filter by NFC team"></select>
         </div>
       </div>
-    </div>
-    <div class="conf-row">
-      <span class="conf-tag"></span>
-      <div class="chips"><button class="chip all" id="allBtn" aria-pressed="true">All games, week by week</button><button class="chip all" id="qbBtn" aria-pressed="false" hidden>QB grades by quarter</button><button class="chip all" id="propsBtn" aria-pressed="false" hidden>Player props</button><button class="chip all" id="savedBtn" aria-pressed="false" hidden>My tracking</button><button class="chip all" id="picksBtn" aria-pressed="false" hidden>My picks</button><button class="chip all" id="boardBtn" aria-pressed="false" hidden>Leaderboard</button></div>
     </div>
   </div>
 
@@ -606,6 +602,8 @@
     moneyline backtest against 11 seasons of closing lines lost money at every
     threshold, so props get no real stake unless the paper record clears the
     vig with a real sample.</p>
+    <p><a class="how" href="how-it-works.html">How it works &mdash; the model,
+    the backtests, and what the numbers mean</a></p>
   </footer>
 </div>
 
@@ -1589,7 +1587,11 @@
     } catch (e) {
       if (prev) picks.set(key, prev); else picks.delete(key);
       render();
-      toast("Could not save that pick — try again in a moment.");
+      // The database refuses writes past kickoff even if this page still
+      // thinks the game is open — a stale tab, or a clock that is behind.
+      toast(/lock at kickoff/.test(String(e.message))
+        ? "That one has already started — picks lock at kickoff."
+        : "Could not save that pick — try again in a moment.");
     }
   }
 
@@ -1629,7 +1631,7 @@
       (label ? ' data-label="' + esc(label) + '"' : "") +
       ' aria-pressed="' + (!!mine && mine.choice === o.value) + '">' +
       esc(o.label) + "</button>").join("") +
-      '<span class="lbl">' + hint + "</span></div>";
+      '<span class="lbl">' + hint + " &middot; locks at kickoff</span></div>";
   }
 
   const gamePickStrip = g => pickStrip("game", g.week, gref(g),
@@ -1675,11 +1677,9 @@
     btn.textContent = session ? "Sign out" : "Sign in";
     btn.title = session && session.user && session.user.email
       ? "Signed in as " + session.user.email : "Save the teams and players you follow";
-    const saved = document.getElementById("savedBtn");
-    saved.hidden = !session;
-    document.getElementById("picksBtn").hidden = !session;
-    // The leaderboard is public: anyone can look, signed in or not.
-    document.getElementById("boardBtn").hidden = SB_PROVIDERS.length === 0;
+    // Signing in or out adds or removes My tracking and My picks; the
+    // leaderboard is public, so it is there either way.
+    syncViewSelect();
   }
 
   // Finish a redirect back from the provider, or restore a stored session.
@@ -1921,6 +1921,11 @@
   }
 
   function renderSaved() {
+    if (!session) {
+      return '<p class="note">Sign in and the &#9734; buttons start sticking. ' +
+        "Star a team and its next game lands here; star a player and his " +
+        "projections come with him &mdash; on every device you sign in on.</p>";
+    }
     const of = pre => [...favs.keys()].filter(k => k.startsWith(pre)).map(k => k.slice(pre.length));
     const teamRefs = of("team:").filter(t => teams[t]);
     const playerRefs = of("player:");
@@ -1968,6 +1973,51 @@
     return html;
   }
 
+  // What the Show dropdown offers. Six chips wrapped onto three rows on a
+  // phone and pushed the week's games below the fold; this is one control
+  // that stays one line at any width.
+  const VIEWS = [
+    { v: "games", label: "All games, week by week", on: () => true },
+    { v: "qb", label: "QB grades by quarter", on: () => !!DATA.qb },
+    { v: "props", label: "Player props", on: () => !!DATA.props },
+    { v: "saved", label: "My tracking", on: () => SB_PROVIDERS.length > 0 },
+    { v: "picks", label: "My picks", on: () => SB_PROVIDERS.length > 0 },
+    { v: "board", label: "Leaderboard", on: () => SB_PROVIDERS.length > 0 },
+    // Only ever the current view, never something to navigate to.
+    { v: "shared", label: "Somebody's picks", on: () => view === "shared" },
+  ];
+
+  function syncViewSelect() {
+    const sel = document.getElementById("viewSel");
+    const want = VIEWS.filter(o => o.on());
+    const have = [...sel.options].map(o => o.value).join(",");
+    if (have !== want.map(o => o.v).join(",")) {
+      sel.innerHTML = "";
+      want.forEach(o => {
+        const el = document.createElement("option");
+        el.value = o.v;
+        el.textContent = o.label;
+        sel.appendChild(el);
+      });
+    }
+    sel.value = view;
+  }
+
+  async function showView(next) {
+    view = next;
+    selected = null;
+    render();
+    if (next === "board" && board === null) {
+      try {
+        board = await publicRpc("leaderboard", { min_picks: 3, limit_n: 50 });
+      } catch (e) {
+        board = [];
+        toast("Could not load the leaderboard.");
+      }
+      render();
+    }
+  }
+
   function render() {
     const main = document.getElementById("main");
     main.innerHTML = view === "shared" ? renderShared()
@@ -2005,12 +2055,7 @@
       sel.classList.toggle("active", !!mine);
       document.getElementById(key + "Wrap").classList.toggle("active", !!mine);
     }
-    document.getElementById("allBtn").setAttribute("aria-pressed", String(view === "games" && selected === null));
-    document.getElementById("propsBtn").setAttribute("aria-pressed", String(view === "props"));
-    document.getElementById("qbBtn").setAttribute("aria-pressed", String(view === "qb"));
-    document.getElementById("savedBtn").setAttribute("aria-pressed", String(view === "saved"));
-    document.getElementById("picksBtn").setAttribute("aria-pressed", String(view === "picks"));
-    document.getElementById("boardBtn").setAttribute("aria-pressed", String(view === "board"));
+    syncViewSelect();
     if (view === "picks" && profile) wireProfileControls();
   }
 
@@ -2094,17 +2139,9 @@
     // Picking in one conference clears the other, so only one team is ever on.
     sel.onchange = () => { view = "games"; selected = sel.value || null; render(); };
   }
-  document.getElementById("allBtn").onclick = () => { view = "games"; selected = null; render(); };
-  const qbBtn = document.getElementById("qbBtn");
-  if (DATA.qb) {
-    qbBtn.hidden = false;
-    qbBtn.onclick = () => { view = "qb"; selected = null; render(); };
-  }
-  const propsBtn = document.getElementById("propsBtn");
-  if (DATA.props) {
-    propsBtn.hidden = false;
-    propsBtn.onclick = () => { view = "props"; selected = null; render(); };
-  }
+  const viewSel = document.getElementById("viewSel");
+  viewSel.onchange = () => showView(viewSel.value);
+  document.getElementById("myPicksBtn").onclick = () => showView("picks");
 
   // Rows expand inline (key players); the analysis bullets open in a modal
   // via the ⓘ button. One delegated handler for both.
@@ -2231,22 +2268,6 @@
     if (e.key === "Enter" || e.key === " ") { e.preventDefault(); toggleGame(e); }
   });
 
-  document.getElementById("savedBtn").onclick = () => {
-    view = "saved"; selected = null; render();
-  };
-  document.getElementById("picksBtn").onclick = () => {
-    view = "picks"; selected = null; render();
-  };
-  document.getElementById("boardBtn").onclick = async () => {
-    view = "board"; selected = null; render();
-    try {
-      board = await publicRpc("leaderboard", { min_picks: 3, limit_n: 50 });
-    } catch (e) {
-      board = [];
-      toast("Could not load the leaderboard.");
-    }
-    render();
-  };
   document.getElementById("authBtn").onclick = async () => {
     if (!session) { showSignIn(); return; }
     const tok = await accessToken();
