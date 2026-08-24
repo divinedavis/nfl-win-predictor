@@ -231,6 +231,18 @@
   .board tr.me td { background: var(--field-soft); font-weight: 700; }
   .board .rank { color: var(--muted); width: 28px; }
 
+  /* A saved pick: three columns, and the pick itself carries the weight. */
+  .pick-item { grid-template-columns: 46px 1fr auto; align-items: center; }
+  .pick-item .picked {
+    display: inline-flex; align-items: baseline; gap: 7px;
+    font-family: "Avenir Next Condensed", "Arial Narrow", system-ui, sans-serif;
+    font-size: 1.12rem; font-weight: 700; line-height: 1.2;
+    color: var(--field); text-wrap: balance;
+  }
+  .pick-item .picked .mark { font-size: 0.72rem; opacity: 0.85; }
+  .pick-item .sub { color: var(--muted); font-size: 0.84rem; margin-top: 2px; }
+  .pick-item .pct { text-align: right; }
+
   .sharebar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 12px 0; }
   .sharebar input.name { max-width: 190px; }
 
@@ -1810,24 +1822,43 @@
     return (name || "Player") + " · " + (STAT_NAMES[bits[1]] || bits[1].replace(/_/g, " "));
   }
 
+  // The pick is the headline. It used to be the other way round — the matchup
+  // was the loud line and the choice sat under it in grey, which meant reading
+  // a sentence to see who somebody took. On a shared card that is the whole
+  // point of the page, so the thing chosen goes first and biggest.
   function pickLine(r, whose) {
-    const verb = whose === "them" ? "took " : "you took ";
-    let what, took;
+    let head, sub, mark;
     if (r.kind === "game") {
+      const parts = r.ref.split("@");
+      const away = parts[0], home = parts[1];
+      const other = r.choice === home ? away : home;
+      const nameOf = t => (teams[t] ? teams[t].name : t);
+      head = nameOf(r.choice);
+      mark = "&#9654;";                      // the side taken
       const g = games.find(x => x.week === r.week && gref(x) === r.ref);
-      what = refLabel(r);
-      took = verb + (teams[r.choice] ? teams[r.choice].name : r.choice);
-      if (g && played(g)) took += " &middot; final " + g.awayScore + "&ndash;" + g.homeScore;
+      if (g && played(g)) {
+        const mine = r.choice === g.home ? g.homeScore : g.awayScore;
+        const theirs = r.choice === g.home ? g.awayScore : g.homeScore;
+        sub = (mine > theirs ? "beat " : mine < theirs ? "lost to " : "tied ") +
+          nameOf(other) + " " + mine + "&ndash;" + theirs;
+      } else {
+        sub = "to win " + (r.choice === home ? "vs " : "at ") + nameOf(other);
+      }
     } else {
-      what = refLabel(r);
-      took = (r.choice === "over" ? "Over " : "Under ") + r.line;
+      const over = r.choice === "over";
+      mark = over ? "&#9650;" : "&#9660;";   // up for over, down for under
+      head = (over ? "Over " : "Under ") + r.line;
+      sub = refLabel(r);
       const actual = r.actual !== undefined && r.actual !== null ? r.actual
         : ((DATA.props || {}).results || {})[r.week + "|" + r.ref];
-      if (actual !== undefined && actual !== null) took += " &middot; actual " + actual;
+      if (actual !== undefined && actual !== null) {
+        sub += " &middot; got " + actual;
+      }
     }
-    return '<div class="game"><div class="when">Wk ' + r.week + "</div>" +
-      '<div class="who"><span class="code">' + esc(what) + "</span>" +
-      '<div class="sub">' + took + "</div></div>" +
+    return '<div class="game pick-item"><div class="when">Wk ' + r.week + "</div>" +
+      '<div class="who"><span class="picked"><span class="mark">' + mark +
+      "</span>" + esc(head) + "</span>" +
+      '<div class="sub">' + sub + "</div></div>" +
       '<div class="pct">' + verdictBadge(r.verdict) + "</div></div>";
   }
 
