@@ -181,7 +181,9 @@
   .trackbtn:hover { border-color: var(--star); color: var(--star); }
   .trackbtn:focus-visible { outline: 2px solid var(--field); outline-offset: 1px; }
   .trackbtn[aria-pressed="true"] { color: var(--star); border-color: var(--star); background: var(--star-soft); }
-  .who .trackbtn { margin-right: 6px; padding: 0 6px; vertical-align: 1px; }
+  .prop-row .who { display: flex; align-items: flex-start; gap: 7px; min-width: 0; }
+  .prop-row .whotext { min-width: 0; }
+  .prop-row .trackbtn { padding: 0 6px; margin-top: 1px; }
   .signin-card { display: grid; gap: 10px; }
   .signin-card .oauth {
     display: flex; align-items: center; justify-content: center; gap: 9px;
@@ -974,8 +976,8 @@
     }
     return '<div class="prop-row">' +
       '<div class="who">' + starBtn("player", p.player, p.player + " · " + p.pos + " · " + p.team) +
-      '<span class="code">' + p.player + "</span>" + st +
-      '<div class="sub">' + p.pos + " · " + p.team + "</div>" + hist + "</div>" +
+      '<div class="whotext"><span class="code">' + p.player + "</span>" + st +
+      '<div class="sub">' + p.pos + " · " + p.team + "</div>" + hist + "</div></div>" +
       '<div class="vs">' + (p.home ? "vs " : "@ ") + p.opp + '</div>' +
       '<div class="rng" role="img" aria-label="80% range ' + p.p10 + " to " + p.p90 + '">' +
       band(p.p10, p.p90, "band80") + band(p.p25, p.p75, "band50") +
@@ -1342,7 +1344,7 @@
   const SB_KEY = "sb_publishable_YY0S0mf2V74kwzjNhG_kvA_WzaGTWES";
   // Providers the Supabase project actually has credentials for. Apple joins
   // the list once its Services ID exists; an empty list hides sign-in entirely.
-  const SB_PROVIDERS = [];
+  const SB_PROVIDERS = ["google"];
   const SESS_KEY = "gridiron.session";
   const VERIFIER_KEY = "gridiron.pkce";
 
@@ -1437,8 +1439,12 @@
       }, o.headers || {}),
       body: o.body ? JSON.stringify(o.body) : undefined,
     });
-    if (!r.ok) throw new Error("rest " + r.status + " " + (await r.text()).slice(0, 120));
-    return r.status === 204 ? null : r.json();
+    const body = await r.text();
+    if (!r.ok) throw new Error("rest " + r.status + " " + body.slice(0, 120));
+    // An insert asks for return=minimal, so a success comes back 201 with an
+    // empty body — r.json() would throw on it and the optimistic star would
+    // roll back a write that actually landed.
+    return body ? JSON.parse(body) : null;
   }
 
   async function loadFavs() {
