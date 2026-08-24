@@ -76,7 +76,7 @@ def describe(c: dict) -> tuple:
                      (f" ({float(pct):.0f}%)" if pct is not None else ""))
     else:
         parts.append("nothing settled yet")
-    parts.append("game winners and player over/unders on Gridiron Odds")
+    parts.append("game winners and player over/unders on Sputter Bets")
     return title, " · ".join(parts)
 
 
@@ -86,7 +86,7 @@ def og_block(title: str, description: str, url: str) -> str:
         "<!--OG-->\n"
         f"<title>{html.escape(title)}</title>\n"
         '<meta property="og:type" content="website">\n'
-        '<meta property="og:site_name" content="Gridiron Odds">\n'
+        '<meta property="og:site_name" content="Sputter Bets">\n'
         f'<meta property="og:title" content="{t}">\n'
         f'<meta property="og:description" content="{d}">\n'
         f'<meta property="og:url" content="{html.escape(url, quote=True)}">\n'
@@ -139,7 +139,7 @@ class Handler(BaseHTTPRequestHandler):
         if c:
             title, desc = describe(c)
         else:
-            title = "Gridiron Odds — a shared card"
+            title = "Sputter Bets — a shared card"
             desc = ("Somebody's game and player-prop picks. Nothing is staked "
                     "on any of it.")
         block = og_block(title, desc, f"{SITE}/s/{share_id}")

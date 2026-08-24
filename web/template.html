@@ -5,17 +5,17 @@
      /s/<share_id> card, so a shared link previews as whose picks it is. Keep
      the markers, and keep the block self-contained. -->
 <!--OG-->
-<title>Gridiron Odds</title>
+<title>Sputter Bets</title>
 <meta property="og:type" content="website">
-<meta property="og:site_name" content="Gridiron Odds">
-<meta property="og:title" content="Gridiron Odds — NFL Win Probabilities">
+<meta property="og:site_name" content="Sputter Bets">
+<meta property="og:title" content="Sputter Bets — NFL Win Probabilities">
 <meta property="og:description" content="Weekly NFL picks with calibrated win probabilities, why-this-pick reasoning, quarterback grades by quarter and under five minutes, ESPN QBR 1–32, player prop projections, and upset watch — from an Elo + XGBoost model. High-confidence picks hit 74% historically.">
 <meta property="og:url" content="https://sputterbets.com/">
 <meta property="og:image" content="https://sputterbets.com/og.jpg">
 <meta property="og:image:width" content="960">
 <meta property="og:image:height" content="600">
 <meta name="twitter:card" content="summary_large_image">
-<meta name="twitter:title" content="Gridiron Odds — NFL Win Probabilities">
+<meta name="twitter:title" content="Sputter Bets — NFL Win Probabilities">
 <meta name="twitter:image" content="https://sputterbets.com/og.jpg">
 <!--/OG-->
 <style>
@@ -531,7 +531,7 @@
 <div class="wrap">
   <header>
     <div class="masthead">
-      <h1>Gridiron Odds <span class="season" id="seasonLabel"></span></h1>
+      <h1>Sputter Bets <span class="season" id="seasonLabel"></span></h1>
       <span class="tagline display" id="genLabel"></span>
       <button class="authbtn" id="myPicksBtn">My picks</button>
       <button class="authbtn" id="authBtn" hidden></button>
@@ -1387,6 +1387,8 @@
   // Providers the Supabase project actually has credentials for. Apple joins
   // the list once its Services ID exists; an empty list hides sign-in entirely.
   const SB_PROVIDERS = ["google"];
+  // Storage keys keep their original names on purpose: renaming them would
+  // sign every existing visitor out for a cosmetic change.
   const SESS_KEY = "gridiron.session";
   const VERIFIER_KEY = "gridiron.pkce";
 
@@ -1912,7 +1914,7 @@
     });
     const pushes = rows.filter(r => r.verdict === "push").length;
     return '<div class="tiles">' +
-      tile(esc(c.display_name), "picks on Gridiron Odds") +
+      tile(esc(c.display_name), "picks on Sputter Bets") +
       tile(c.pct === null ? "&mdash;" : Number(c.pct).toFixed(1) + "%",
            "of settled picks correct") +
       tile(c.wins + "&ndash;" + c.losses, "won&ndash;lost") +
