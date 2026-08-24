@@ -1589,7 +1589,11 @@
     } catch (e) {
       if (prev) picks.set(key, prev); else picks.delete(key);
       render();
-      toast("Could not save that pick — try again in a moment.");
+      // The database refuses writes past kickoff even if this page still
+      // thinks the game is open — a stale tab, or a clock that is behind.
+      toast(/lock at kickoff/.test(String(e.message))
+        ? "That one has already started — picks lock at kickoff."
+        : "Could not save that pick — try again in a moment.");
     }
   }
 
@@ -1629,7 +1633,7 @@
       (label ? ' data-label="' + esc(label) + '"' : "") +
       ' aria-pressed="' + (!!mine && mine.choice === o.value) + '">' +
       esc(o.label) + "</button>").join("") +
-      '<span class="lbl">' + hint + "</span></div>";
+      '<span class="lbl">' + hint + " &middot; locks at kickoff</span></div>";
   }
 
   const gamePickStrip = g => pickStrip("game", g.week, gref(g),

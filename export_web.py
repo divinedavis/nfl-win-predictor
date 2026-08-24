@@ -78,11 +78,15 @@ def _log_projections(shown: pd.DataFrame) -> None:
     go in: those are the only ones anyone can pick, and logging the full
     projection table instead would put a quarter of a megabyte of results into
     the payload by January."""
-    cols = ["season", "week", "stat", "player_id", "player"]
+    cols = ["season", "week", "stat", "player_id", "player", "team"]
+    ident = ["season", "week", "stat", "player_id"]
     rows = shown[cols].drop_duplicates()
     if PROJECTION_LOG.exists():
         rows = pd.concat([pd.read_csv(PROJECTION_LOG), rows], ignore_index=True)
-    rows.drop_duplicates(cols).sort_values(cols).to_csv(PROJECTION_LOG, index=False)
+    # keep="last" so a row written before `team` existed is replaced by the
+    # current one rather than sitting alongside it with an empty column
+    (rows.drop_duplicates(subset=ident, keep="last")
+         .sort_values(ident).to_csv(PROJECTION_LOG, index=False))
 
 
 def _prop_results(season: int, week: int) -> dict:
