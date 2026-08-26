@@ -359,6 +359,31 @@ kind. Three probes looked like a dead market before `yes_bid_dollars`,
 than 15 cents is dropped rather than guessed at: a yawning spread is nobody
 making a market, not a cheap edge.
 
+### Kalshi on props
+
+Kalshi prices props as **threshold contracts** — "75+ receiving yards" is a
+market that settles yes at 75 — which is exactly the question `prob_over`
+already answers from the quantile grid. So the page shows both numbers **at the
+same line**, which is the only comparison that means anything: our P50 against
+their 75+ line would be two answers to two questions.
+
+The threshold nearest our median wins, and only if it falls inside the 80%
+band — outside it both sides read as near-certain and agree for no reason. The
+player and the number come from `yes_sub_title` ("Will Levis: 75+"), never the
+ticker, which mangles the name into `TENWLEVIS8`. The parser is validated
+against 101 settled preseason markets.
+
+**Prop series only exist during game week.** Outside it every series returns
+zero markets, `kalshi_props()` returns `{}`, and the prop rows simply show no
+Kalshi number. `test_sources.py` stands in for the live data, since none of
+this can be exercised until September.
+
+Game coverage needed three fixes worth remembering: `JAC` against nflverse's
+`JAX` silently dropped every Jacksonville game; a book wider than 15 cents now
+falls back to the last trade rather than being discarded; and a one-sided quote
+could never match at all, because the lookup keys on the team *pair* and the
+event ticker concatenates two variable-length codes with no separator.
+
 ### FPI: tested, not promoted
 
 FPI is the only outside source with real history, so it is the only one that
