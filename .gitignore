@@ -34,3 +34,5 @@ market_consensus.csv
 spread_odds_history.csv
 inactives.csv
 .odds_credits
+clv_picks.csv
+backups/

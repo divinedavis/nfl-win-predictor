@@ -21,6 +21,8 @@ python3.12 -m venv .venv          # needs Homebrew python3.12+ (system 3.9 is to
 .venv/bin/python position_impact.py  # which position's injuries move win prob
 .venv/bin/python export_web.py    # rebuild web/index.html for the web app
 .venv/bin/python fetch_inactives.py  # ESPN gameday statuses -> inactives.csv
+.venv/bin/python clv.py --record     # lock in today's number vs the market
+.venv/bin/python clv.py --report     # closing line value to date
 ODDS_API_KEY=... .venv/bin/python fetch_spread_odds.py  # all US books, 2 credits
 .venv/bin/python build_qb_splits.py  # per-quarter QB dropback splits (cached CSV)
 .venv/bin/python build_qbr.py        # ESPN Total QBR, week + season level
@@ -147,6 +149,7 @@ seasons. What has been tested so far —
 | Spread from preseason Vegas win totals (RJ's rule) | `wintotals_rule.py` | No edge — 50.3% ATS as stated, 51.3% at best fit; see below |
 | **No-vig market probability** | `train.py` | **Promoted** — Brier .2206 → .2164, now the #3 feature |
 | Gameday inactives resolving Questionable | `fetch_inactives.py` | Shipped on measured need (63.3% of Q play); no backtest possible — ESPN does not retain past inactives |
+| **Early-season ATS edge (weeks 1-4)** | `clv.py` | **Live hypothesis** — 59.1% ATS at edge ≥3 (n=210), monotonic decay, corroborated by the win-totals decay; being measured by CLV, nothing staked |
 
 The pattern: a feature wins only when it carries information Elo and rolling
 EPA could not already have absorbed through game results. The market feature is
@@ -195,6 +198,13 @@ edge**: `ats_backtest.py` covers 50.4% over 2,943 games (2015–2025), above the
 52.4% breakeven in 3 of 11 seasons. The model's expected margin misses by 10.38
 points on average; the closing line misses by 10.08. The line is the better
 margin estimate, so a lean built by disagreeing with it loses to the juice.
+
+**Season-wide.** That full-season number is not the last word: split by week,
+weeks 1–4 clear breakeven at every edge threshold and weeks 5+ are flat dead —
+see *Closing line value* for the evidence and the pre-registered rule now being
+measured. The 50.4% here is the average of a real early-season edge and a
+slightly negative one for the rest of the year, which is why it reads as
+nothing. Nothing is staked on it either way until CLV says so.
 
 An earlier run of this same script recorded 55.2% (10/11 seasons) on
 2026-08-13. It does not reproduce under the current features, under the
@@ -314,6 +324,77 @@ Two guards worth knowing about: the fetcher skips anything that is not
 week 3 as regular-season week 3; and repeated runs merge by
 (season, week, team, player) with the newest status winning, so the Sunday
 11:45 run overwrites what Friday recorded.
+
+## Closing line value
+
+Accuracy against the closing line is the one contest the market wins by
+construction — the close aggregates everyone's information, this model's
+included. `clv.py` scores the question that actually separates a winning bettor
+from a lucky one: **when we commit to a number, does the line then move toward
+us?** CLV converges in tens of bets rather than hundreds, because it grades the
+price instead of the coin flip sitting on top of it, and a model with no edge
+averages zero however its season happens to land.
+
+### The pre-registered rule
+
+Fixed in code before the 2026 season, so it cannot be tuned to whatever the
+data turns out to show:
+
+> **weeks 1–4, model margin disagrees with the market by ≥ 3.0 points**
+
+Walk-forward 2015–2025, the model's ATS record on its own disagreements:
+
+| Slice | edge ≥ 0 | edge ≥ 3.0 |
+|---|---|---|
+| **Weeks 1–4** | 53.3% (n=679) | **59.1% (n=210)** |
+| Weeks 5+ | 50.6% (n=2,264) | 50.2% (n=677) |
+
+Breakeven is 52.4%. Three things make this worth acting on rather than
+dismissing as a slice found by looking:
+
+1. **A regression says the model carries independent information there.**
+   Outcomes on market probability *and* a market-blind model probability: the
+   model's coefficient is +0.572 [+0.19, +1.03] in weeks 1–4 (99.8% of
+   bootstrap draws positive) and +0.029 [−0.20, +0.26] afterwards. Full-season
+   it is +0.158 and not significant — the effect only exists early.
+2. **The decay is monotonic.** Contiguous four-week windows run 59.1, 55.0,
+   52.5, 53.1, 47.9, 45.4, 48.8, 50.5. A lucky window spikes; a real seasonal
+   effect slopes.
+3. **It reproduces a finding from a different direction.** `wintotals_rule.py`
+   independently measured 54.1% in weeks 1–4 decaying to 47.9% by week 15.
+4. **There is a mechanism.** In September the market prices off priors because
+   no current-season data exists yet.
+
+Robustness: the result holds under both margin maps (59.1% logit, 60.2% under
+the repo's linear-in-p map used by `ats_backtest.py`).
+
+**It is not proven.** n=210 at the useful threshold is ~25 bets a season, 7/11
+seasons clear breakeven, and the range is 42%–76%. That is precisely why this
+ships as a measurement harness and not as a staked bet.
+
+### How it works
+
+`--record` locks in the model's number against the market's the first time a
+game has enough books, and **never revises it** — re-recording later would let
+a number be chosen with hindsight about which way the line went. `--settle`
+attaches the closing number once kickoff has passed, and `--report` splits CLV
+by the pre-registered rule versus everything else. Every game is logged, not
+just qualifying ones, so the rule is reported against the full field rather
+than cherry-picked out of it.
+
+`RULE_MIN_BOOKS = 4` is a data-quality gate, not an outcome filter: weeks 2–4
+open months out on two offshore books, and locking a number against that thin a
+consensus measures scrape noise rather than the market.
+
+The sign conventions in `clv_points()` and `ats_result()` are covered by
+`test_clv.py` — an inverted sign in either would not raise anything, it would
+quietly report a losing model as a winning one. (An earlier throwaway version of
+the ATS check did exactly that, returning 36% until the cover rule was fixed to
+`margin > spread_line`.)
+
+`clv_picks.csv` accumulates **only on the droplet**, like
+`spread_odds_history.csv`. `refresh.sh` keeps 14 daily copies in `backups/`, and
+`scripts/pull_clv_data.sh` pulls both into the local checkout.
 
 ## Player props (paper trading)
 

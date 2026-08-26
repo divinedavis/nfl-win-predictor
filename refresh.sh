@@ -28,6 +28,22 @@ alert() { echo "!!!!!!!!!! ALERT: $* !!!!!!!!!!"; }
   # 2 credits: 2 markets x 1 region. Every US book costs the same as one.
   $PY fetch_spread_odds.py || alert "spread odds fetch FAILED — market feature will fall back to the schedule's line"
 
+  # Closing line value. --record locks in the model's number against the
+  # market's the first time a game has enough books; it never revises a
+  # recorded game, so this is safe to run as often as the odds refresh.
+  $PY clv.py --record || echo "clv record failed (non-fatal)"
+  $PY clv.py --settle || echo "clv settle failed (non-fatal)"
+
+  # These two files exist nowhere else: /opt/nfl-predictor is a plain copy, not
+  # a checkout, and both are gitignored because they are append-only runtime
+  # data. Losing the droplet would lose the entire CLV experiment with it.
+  mkdir -p backups
+  for f in clv_picks.csv spread_odds_history.csv; do
+    [ -f "$f" ] && cp "$f" "backups/$f.$(date +%Y%m%d)"
+  done
+  # Two weeks of dailies is plenty to notice a problem and recover.
+  find backups -name '*.csv.*' -mtime +14 -delete 2>/dev/null || true
+
   if [ "$MODE" = "--gameday" ]; then
     # Rebuild features so the resolved inactives and the fresh consensus reach
     # the page, then republish. The model itself is normally unchanged.
@@ -68,6 +84,7 @@ alert() { echo "!!!!!!!!!! ALERT: $* !!!!!!!!!!"; }
     # played since, so there is a permanent record to learn from later.
     $PY diary.py --settle --record || echo "diary update failed (non-fatal)"
     $PY diary.py --report | tail -12 || true
+    $PY clv.py --report || true
     $PY export_web.py
     # Results the picks page grades against. Runs after export_web.py because
     # that is what appends this week's players to the projection log.
