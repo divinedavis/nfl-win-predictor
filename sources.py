@@ -35,7 +35,7 @@ EVENT_RE = re.compile(r"^KXNFLGAME-(\d{2})([A-Z]{3})(\d{2})([A-Z]{4,6})$")
 MONTHS = {m: i + 1 for i, m in enumerate(
     ["JAN", "FEB", "MAR", "APR", "MAY", "JUN",
      "JUL", "AUG", "SEP", "OCT", "NOV", "DEC"])}
-KALSHI_TO_NFLVERSE = {"LAR": "LA", "WSH": "WAS"}
+KALSHI_TO_NFLVERSE = {"LAR": "LA", "WSH": "WAS", "JAC": "JAX"}
 
 
 def _canon(t: str) -> str:
@@ -84,13 +84,20 @@ def kalshi_probs(schedule: pd.DataFrame) -> dict:
     if k.empty:
         return {}
 
-    # (date, frozenset(teams)) -> nflverse game_id
+    # Two indexes, because a market can be priced on one side only. The pair
+    # index is preferred; the single-team index catches the case where the
+    # other side has no price at all and the team pair therefore cannot be
+    # reconstructed -- the event ticker concatenates both codes with no
+    # separator, and 2-3 character codes cannot be split back apart reliably.
     sched: dict = {}
+    by_team: dict = {}
     for r in schedule.itertuples(index=False):
         day = pd.to_datetime(r.gameday).date()
         for offset in (-1, 0, 1):   # kickoff crosses UTC midnight for night games
             d = day + pd.Timedelta(days=offset)
             sched[(d, frozenset({r.home_team, r.away_team}))] = (r.game_id, r.home_team)
+            for t in (r.home_team, r.away_team):
+                by_team.setdefault((d, t), []).append((r.game_id, r.home_team))
 
     out: dict = {}
     for event, grp in k.groupby("event_ticker"):
@@ -105,18 +112,98 @@ def kalshi_probs(schedule: pd.DataFrame) -> dict:
         sides = {}
         for r in grp.itertuples(index=False):
             team = _canon(str(r.ticker).rsplit("-", 1)[-1])
+            # Prefer a quoted midpoint tight enough to mean something; fall
+            # back to the last trade, which is a price somebody actually paid
+            # and beats discarding the game entirely. Both sides are kept so
+            # they can be averaged below.
             if pd.notna(r.usable_mid):
                 sides[team] = float(r.usable_mid)
-        if len(sides) < 2:
+            elif pd.notna(r.last_price):
+                sides[team] = float(r.last_price)
+        if not sides:
             continue
         for offset in (0, -1, 1):
-            hit = sched.get((day + pd.Timedelta(days=offset), frozenset(sides)))
-            if hit:
-                gid, home = hit
-                if home in sides:
-                    out[gid] = sides[home]
-                break
+            d = day + pd.Timedelta(days=offset)
+            hit = sched.get((d, frozenset(sides)))
+            if not hit and len(sides) == 1:
+                # One priced side: identify the game by that team and date.
+                # Ambiguous only if a team played twice in a day, which does
+                # not happen, so a single candidate is the match.
+                cands = by_team.get((d, next(iter(sides))), [])
+                hit = cands[0] if len(cands) == 1 else None
+            if not hit:
+                continue
+            gid, home = hit
+            away = next((t for t in sides if t != home), None)
+            if home in sides and away in sides:
+                # Two independent quotes for the same event. On an exchange
+                # they need not sum to 1, so averaging the home price against
+                # the away price's complement uses both and cancels a one-
+                # sided skew.
+                out[gid] = (sides[home] + (1.0 - sides[away])) / 2
+            elif home in sides:
+                out[gid] = sides[home]
+            elif away in sides:
+                out[gid] = 1.0 - sides[away]
+            break
     return out
+
+
+# Kalshi prop series -> the stat names props.py projects. Series it lists that
+# this model has no projection for (passing TDs, sacks, anytime TD) are simply
+# not mapped, so they are collected but never compared against nothing.
+KALSHI_PROP_STAT = {
+    "KXNFLPASSYDS": "passing_yards",
+    "KXNFLRECYDS": "receiving_yards",
+    "KXNFLRUSHYDS": "rushing_yards",
+    "KXNFLRECEPTIONS": "receptions",
+}
+# yes_sub_title reads "Will Levis: 75+". The ticker mangles the name into
+# TENWLEVIS8, so the subtitle is the only reliable source of both the player
+# and the threshold.
+SUB_RE = re.compile(r"^(?P<player>.+?):\s*(?P<line>[\d.]+)\+")
+
+
+def kalshi_props() -> dict:
+    """(normalised player, stat) -> [(threshold, P(stat >= threshold)), ...].
+
+    Kalshi prices props as threshold contracts -- "75+ passing yards" is a
+    market that settles yes at 75 -- which lines up directly with the quantile
+    projections in props.py, where prob_over answers the same question. Each
+    player/stat can carry several thresholds; they are returned sorted so a
+    caller can pick the one nearest whatever line it cares about.
+
+    Prop series only open in game week. Outside it this returns {} and every
+    caller degrades to showing no Kalshi number, which is correct.
+    """
+    if not os.path.exists(KALSHI_CSV):
+        return {}
+    try:
+        k = pd.read_csv(KALSHI_CSV)
+    except Exception:
+        return {}
+    if "sub_title" not in k.columns:
+        return {}
+    k = k[k.series.isin(KALSHI_PROP_STAT)]
+    out: dict = {}
+    for r in k.itertuples(index=False):
+        m = SUB_RE.match(str(r.sub_title or ""))
+        if not m:
+            continue
+        price = r.usable_mid if pd.notna(r.usable_mid) else r.last_price
+        if pd.isna(price):
+            continue
+        stat = KALSHI_PROP_STAT[r.series]
+        key = (_norm_player(m.group("player")), stat)
+        out.setdefault(key, []).append((float(m.group("line")), float(price)))
+    return {k2: sorted(v) for k2, v in out.items()}
+
+
+def _norm_player(name: str) -> str:
+    """Match props.py's norm_name so Kalshi and the projections agree on who
+    a player is."""
+    from features import norm_name
+    return norm_name(str(name))
 
 
 def all_sources(schedule: pd.DataFrame) -> dict:

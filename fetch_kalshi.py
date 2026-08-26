@@ -85,11 +85,15 @@ def markets(series: str, status: str = "open") -> list:
 
 def main() -> None:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--props", action="store_true", help="also pull prop series")
+    ap.add_argument("--no-props", action="store_true",
+                    help="skip the player prop series")
     args = ap.parse_args()
 
     stamp = datetime.now(timezone.utc).isoformat(timespec="seconds")
-    series = GAME_SERIES + (PROP_SERIES if args.props else [])
+    # Props are pulled by default. They cost almost nothing when closed --
+    # outside game week every prop series returns zero markets -- and being
+    # absent is exactly why they were easy to forget about.
+    series = GAME_SERIES + ([] if args.no_props else PROP_SERIES)
     rows, priced = [], 0
 
     for s in series:
@@ -109,6 +113,10 @@ def main() -> None:
             rows.append({
                 "fetched_at": stamp, "series": s, "ticker": m.get("ticker"),
                 "event_ticker": m.get("event_ticker"), "title": m.get("title", ""),
+                # Prop markets are thresholds, and yes_sub_title carries the
+                # player and the number in a parseable form ("Will Levis: 75+")
+                # where the ticker mangles the name (TENWLEVIS8).
+                "sub_title": m.get("yes_sub_title", ""),
                 "close_time": m.get("close_time", ""),
                 "yes_bid": bid, "yes_ask": ask, "yes_mid": mid,
                 "spread_cents": round(width, 1) if width is not None else "",
@@ -123,7 +131,7 @@ def main() -> None:
         return
 
     fields = ["fetched_at", "series", "ticker", "event_ticker", "title",
-              "close_time", "yes_bid", "yes_ask", "yes_mid", "spread_cents",
+              "sub_title", "close_time", "yes_bid", "yes_ask", "yes_mid", "spread_cents",
               "usable_mid", "last_price", "open_interest"]
     with open(CONSENSUS_CSV, "w", newline="") as f:
         w = csv.DictWriter(f, fieldnames=fields)

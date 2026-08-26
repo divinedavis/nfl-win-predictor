@@ -126,6 +126,33 @@ def props_payload():
     proj = pd.read_csv(path)
     if proj.empty:
         return None
+    # Kalshi prices props as threshold contracts ("75+ receiving yards"), which
+    # is the same question prob_over answers, so the two are directly
+    # comparable. Empty outside game week, when no prop market is open.
+    from features import norm_name
+    from props import prob_over as _prob_over
+    from sources import kalshi_props
+    kprops = kalshi_props()
+
+    def kalshi_for(player: str, stat: str, quants) -> dict | None:
+        """Kalshi's price at whichever threshold sits closest to our median,
+        alongside our own probability for that same threshold. Comparing at a
+        shared number is the only comparison that means anything -- our P50
+        against their 75+ line would be two answers to two questions."""
+        rows = kprops.get((norm_name(player), stat))
+        if not rows:
+            return None
+        p10, median, p90 = float(quants[0]), float(quants[2]), float(quants[4])
+        # Only compare at a threshold this projection actually has an opinion
+        # about. Outside the 80% band both sides read as near-certain, so the
+        # numbers agree for no reason and the comparison teaches nothing.
+        inband = [t for t in rows if p10 <= t[0] <= p90]
+        if not inband:
+            return None
+        line, price = min(inband, key=lambda t: abs(t[0] - median))
+        return {"line": line, "k": round(price, 3),
+                "ours": round(float(_prob_over(quants, line)), 3)}
+
     stats = []
     shown = []
     for stat, label in STAT_LABELS.items():
@@ -144,6 +171,8 @@ def props_payload():
             "vsAvg": _f(getattr(r, "vs_opp_avg", None), 1),
             "vsLog": getattr(r, "vs_opp_log", "") or "",
             "carAvg": _f(getattr(r, "career_avg", None), 1),
+            # {line, k: Kalshi P(>= line), ours: our P(>= line)} or absent
+            "kal": kalshi_for(r.player, stat, [r.p10, r.p25, r.p50, r.p75, r.p90]),
         } for r in d.itertuples(index=False)]
         if players:
             stats.append({"key": stat, "label": label, "players": players})
