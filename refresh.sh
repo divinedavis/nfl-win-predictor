@@ -25,6 +25,12 @@ alert() { echo "!!!!!!!!!! ALERT: $* !!!!!!!!!!"; }
 
   # Late-breaking availability. Free, no API key, safe to run repeatedly.
   $PY fetch_inactives.py || echo "inactives fetch failed (non-fatal)"
+  # Outside opinions. Both are free and unmetered, unlike the Odds API, so
+  # they run on every pass: Kalshi is an exchange price with no vig, FPI is an
+  # independent model. Neither is load-bearing -- sources.py drops whatever is
+  # missing -- so a failure here is a display gap, not a broken page.
+  $PY fetch_kalshi.py || echo "kalshi fetch failed (non-fatal)"
+  $PY fetch_espn_fpi.py || echo "espn fpi fetch failed (non-fatal)"
   # 2 credits: 2 markets x 1 region. Every US book costs the same as one.
   $PY fetch_spread_odds.py || alert "spread odds fetch FAILED — market feature will fall back to the schedule's line"
 
@@ -38,7 +44,7 @@ alert() { echo "!!!!!!!!!! ALERT: $* !!!!!!!!!!"; }
   # a checkout, and both are gitignored because they are append-only runtime
   # data. Losing the droplet would lose the entire CLV experiment with it.
   mkdir -p backups
-  for f in clv_picks.csv spread_odds_history.csv; do
+  for f in clv_picks.csv spread_odds_history.csv kalshi_history.csv espn_fpi.csv; do
     [ -f "$f" ] && cp "$f" "backups/$f.$(date +%Y%m%d)"
   done
   # Two weeks of dailies is plenty to notice a problem and recover.

@@ -336,6 +336,19 @@
   }
   .why li::marker { color: var(--field); }
   .why li b { color: var(--ink); font-weight: 600; }
+  /* Outside opinions on the same game, one row per source. */
+  .srcs { display: flex; flex-direction: column; gap: 6px; margin-top: 2px; }
+  .srcs .row { display: grid; grid-template-columns: 8.5rem 1fr 2.9rem;
+    align-items: center; gap: 8px; font-size: 0.82rem; color: var(--muted); }
+  .srcs .row .nm { white-space: nowrap; }
+  .srcs .row .nm .sub2 { display: block; font-size: 0.68rem; opacity: 0.7; }
+  .srcs .track { height: 7px; border-radius: 4px;
+    background: color-mix(in srgb, var(--field) 18%, transparent); overflow: hidden; }
+  .srcs .fill { height: 100%; border-radius: 4px; background: var(--field); }
+  .srcs .row.ours .fill { background: var(--accent, #f2c14e); }
+  .srcs .row.ours .nm, .srcs .row.ours .pv { color: var(--ink); font-weight: 600; }
+  .srcs .pv { text-align: right; font-variant-numeric: tabular-nums; }
+  .srcs .note { font-size: 0.78rem; color: var(--muted); margin-top: 2px; }
   .game .when { color: var(--muted); font-size: 0.78rem; line-height: 1.3; }
   .game .who { font-size: 1rem; }
   .game .who .code { font-weight: 700; }
@@ -878,6 +891,55 @@
       " — proj " + p.v + " " + p.u + veg + vs + "</li>";
   }
 
+  // ---- what everyone thinks ----
+  // Four opinions on the same game, all expressed as the picked team's win
+  // probability so they can be read against each other. They are NOT four
+  // independent votes: the books largely copy a handful of originators, while
+  // Kalshi (an exchange, no vig) and FPI (a separate model) are genuinely
+  // separate reads. Sources missing for a game are simply not shown.
+  const SRC_LABEL = {
+    books:  ["Sportsbooks", "consensus, vig removed"],
+    kalshi: ["Kalshi", "exchange, no vig"],
+    fpi:    ["ESPN FPI", "independent model"],
+  };
+
+  function sourcesBlock(g) {
+    const src = g.src || {};
+    const keys = Object.keys(SRC_LABEL).filter(k => src[k] != null);
+    if (!keys.length) return "";
+    const isHome = pick(g) === g.home;
+    // Stored as home probability; flip when the pick is the away team.
+    const forPick = v => isHome ? v : 1 - v;
+    const rows = [["model", "Sputter model", "our number", probFor(pick(g), g)]]
+      .concat(keys.map(k => [k, SRC_LABEL[k][0], SRC_LABEL[k][1], forPick(src[k])]));
+
+    let html = '<div class="why-label display" style="margin-top:12px">' +
+      "What everyone thinks &mdash; " + teams[pick(g)].name + " to win</div>" +
+      '<div class="srcs">';
+    for (const [key, name, sub, p] of rows) {
+      html += '<div class="row' + (key === "model" ? " ours" : "") + '">' +
+        '<span class="nm">' + name + '<span class="sub2">' + sub + "</span></span>" +
+        '<span class="track"><span class="fill" style="width:' +
+          Math.round(p * 100) + '%"></span></span>' +
+        '<span class="pv">' + Math.round(p * 100) + "%</span></div>";
+    }
+    const ours = probFor(pick(g), g);
+    const others = rows.slice(1).map(r => r[3]);
+    const spread = Math.max(...others.concat(ours)) - Math.min(...others.concat(ours));
+    const gap = ours - (others.reduce((a, b) => a + b, 0) / others.length);
+    const pts = n => n + (n === 1 ? " point" : " points");
+    let note;
+    if (spread <= 0.04) note = "Everyone agrees within " + pts(Math.round(spread * 100)) +
+      ". No disagreement to exploit here.";
+    else if (Math.abs(gap) < 0.03) note = "The outside numbers disagree with each " +
+      "other by " + pts(Math.round(spread * 100)) + ", but we sit in the middle of them.";
+    else note = "We are " + pts(Math.round(Math.abs(gap) * 100)) + " " +
+      (gap > 0 ? "higher" : "lower") + " on " + teams[pick(g)].name +
+      " than the outside average. Historically we only beat the market on this " +
+      "kind of disagreement in weeks 1-4.";
+    return html + '</div><div class="note">' + note + "</div>";
+  }
+
   function keyPlayers(g) {
     const f = g.f || {};
     if (!(f.playersA || []).length && !(f.playersH || []).length) return "";
@@ -893,13 +955,14 @@
   function inlinePanel(g) {
     return '<div class="why"><button class="chip all info-open" aria-haspopup="dialog">' +
       "&#9432; Full analysis &mdash; why " + teams[pick(g)].name + "</button>" +
-      keyPlayers(g) + "</div>";
+      sourcesBlock(g) + keyPlayers(g) + "</div>";
   }
 
   function whyModal(g) {
     return '<div class="why"><div class="why-label display">Why ' +
       teams[pick(g)].name + "</div><ul>" +
-      whyBullets(g).map(b => "<li>" + b + "</li>").join("") + "</ul></div>";
+      whyBullets(g).map(b => "<li>" + b + "</li>").join("") + "</ul>" +
+      sourcesBlock(g) + "</div>";
   }
 
   function gameRow(g, perspective) {

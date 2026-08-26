@@ -249,6 +249,7 @@ def main() -> None:
     # books post them in game week.
     from features import norm_name
     from props import prob_over
+    from sources import all_sources
     prop_lines: dict = {}
     snaps = sorted(Path("props_lines").glob("*.csv"))
     if snaps:
@@ -369,6 +370,12 @@ def main() -> None:
         kickoffs[(int(r.week), r.away_team, r.home_team)] = (
             stamp.astimezone(ZoneInfo("UTC")).strftime("%Y-%m-%dT%H:%M:%SZ"))
 
+    # Every outside opinion on each game: the sportsbook consensus, Kalshi's
+    # exchange price, and ESPN's FPI. Shown next to the model's own number so a
+    # reader can see who agrees and who does not, rather than taking one
+    # number on faith. Any of them may be missing for any game.
+    outside = all_sources(season)
+
     games = []
     for r in season.sort_values(["week", "gameday"]).itertuples(index=False):
         # Everything the "why this pick" panel cites, keyed H/A. Kept raw —
@@ -452,6 +459,10 @@ def main() -> None:
             "vegasLine": _f(r.spread_line, 1),
             "modelMargin": _f(r.model_margin, 1),
             "coverProb": _f(r.cover_prob, 3),
+            # Outside opinions, all as home win probability on the same scale
+            # as homeProb, so the page can compare them directly.
+            "src": {k: round(v, 3) for k, v in
+                    outside.get(r.game_id, {}).items()},
             "spH": spread_prices.get((r.home_team, r.away_team), {}).get("home"),
             "spA": spread_prices.get((r.home_team, r.away_team), {}).get("away"),
             "awayScore": None if pd.isna(r.away_score) else int(r.away_score),
