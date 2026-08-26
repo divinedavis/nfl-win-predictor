@@ -20,6 +20,8 @@ python3.12 -m venv .venv          # needs Homebrew python3.12+ (system 3.9 is to
 .venv/bin/python predict.py --season 2026 --week 5
 .venv/bin/python position_impact.py  # which position's injuries move win prob
 .venv/bin/python export_web.py    # rebuild web/index.html for the web app
+.venv/bin/python fetch_inactives.py  # ESPN gameday statuses -> inactives.csv
+ODDS_API_KEY=... .venv/bin/python fetch_spread_odds.py  # all US books, 2 credits
 .venv/bin/python build_qb_splits.py  # per-quarter QB dropback splits (cached CSV)
 .venv/bin/python build_qbr.py        # ESPN Total QBR, week + season level
 .venv/bin/python qb_grades.py        # the quarter/late-game/playoff report
@@ -48,7 +50,15 @@ so rookies and backups sit near 0 and stars ride well above. The model uses:
 Lives at `/opt/nfl-predictor` on the 104.248.12.129 droplet, served by nginx
 at `http://104.248.12.129/nfl/` (and `nfl.divinedavis.com` once DNS exists).
 `refresh.sh` runs daily at 10:30 UTC via root's crontab: fresh injuries,
-weather forecasts, retrain, redeploy to `/var/www/nfl`.
+weather forecasts, retrain, redeploy to `/var/www/nfl`. `refresh.sh --gameday`
+is the fast path — late inactives, fresh market consensus, rebuild, deploy, no
+retrain — scheduled in each pre-kickoff window (Sun 11:45 and 15:45 ET, Thu and
+Mon 19:15 ET). It takes about a minute; nothing the weekly builds read changes
+on a gameday.
+
+`spread_odds_history.csv` accumulates only on the droplet — `/opt/nfl-predictor`
+is a plain copy, not a checkout, so the file never flows back to git. Back it up
+before rebuilding that box.
 
 ## Web app
 
@@ -81,6 +91,8 @@ and the week record.
 - **Weather**: recorded temp/wind for training; free Open-Meteo forecasts at
   predict time for outdoor games within 16 days of kickoff (no API key).
 - **Context**: rest days, divisional game, dome, week number.
+- **Market**: the no-vig consensus win probability (`mkt_prob`) — the closing
+  moneyline with the book's margin removed. See *The market as a feature*.
 - **Model**: XGBoost classifier on the above; final probability is
   `0.4 * xgboost + 0.6 * elo` (blend weight swept in backtest — it beats
   either component on calibration).
@@ -133,9 +145,13 @@ seasons. What has been tested so far —
 | Upset indicators (luck, sacks, blitz, travel, letdown) | `backtest_groups.py` | None promoted; two kept as display flags |
 | **2+ starting offensive linemen out** | `ol_ablation.py` | Real in raw numbers, already priced — see below |
 | Spread from preseason Vegas win totals (RJ's rule) | `wintotals_rule.py` | No edge — 50.3% ATS as stated, 51.3% at best fit; see below |
+| **No-vig market probability** | `train.py` | **Promoted** — Brier .2206 → .2164, now the #3 feature |
+| Gameday inactives resolving Questionable | `fetch_inactives.py` | Shipped on measured need (63.3% of Q play); no backtest possible — ESPN does not retain past inactives |
 
 The pattern: a feature wins only when it carries information Elo and rolling
-EPA could not already have absorbed through game results.
+EPA could not already have absorbed through game results. The market feature is
+the clearest case — it is the one input built from information the model has no
+other way to see.
 
 ### Offensive line injuries
 
@@ -193,27 +209,104 @@ Each season predicted by a model trained only on prior seasons.
 | Predictor            | Accuracy | Brier |
 |----------------------|----------|-------|
 | Always pick home     | 55.0%    | —     |
-| Elo alone            | 64.5%    | .2222 |
-| **Blend (shipped)**  | **64.9%**| **.2206** |
+| Elo alone            | 64.7%    | .2217 |
+| **Blend (shipped)**  | **65.7%**| **.2164** |
 | Vegas closing spread | 66.1%    | —     |
 
 Selective picking (`predict.py --min-conf`): confidence is well calibrated,
 so acting only on the model's strongest picks buys accuracy —
 
-| Confidence cutoff | Picks/week | Accuracy |
-|-------------------|-----------|----------|
-| ≥ 0.60            | ~9.5      | 69.7%    |
-| ≥ 0.65 (starred)  | ~6.8      | 73.1%    |
-| ≥ 0.70            | ~4.6      | 76.5%    |
+| Confidence cutoff | Picks/week | Accuracy | Seasons ≥70% |
+|-------------------|-----------|----------|--------------|
+| ≥ 0.55            | ~10.3     | 68.0%    | 3/11         |
+| ≥ 0.58            | ~8.9      | 70.1%    | 5/11         |
+| ≥ 0.60            | ~7.9      | 71.6%    | 7/11         |
+| ≥ 0.65 (starred)  | ~5.6      | 74.6%    | 10/11        |
+| ≥ 0.70            | ~4.0      | 77.8%    | 11/11        |
+
+The last column matters more than the accuracy column: a cutoff that averages
+70% while clearing it in 3 seasons of 11 is a number that will embarrass you in
+public. Only ≥0.65 and above hold up season by season.
 
 Honest read: single-game NFL outcomes are mostly noise, and ~67% on all games
 is the practical ceiling (the Vegas closing line, which prices in everything,
 sits at 66.1%). Injury + QB-change + weather features lifted the blend past
-plain Elo; the remaining gap to Vegas is real. 70%+ on every game is not a
-thing any honest model achieves — 70%+ on the starred subset is.
+plain Elo, and the no-vig market feature closed most of what was left. 70%+ on
+every game is not a thing any honest model achieves — 70%+ on the starred
+subset is, in 10 seasons out of 11.
 
 `spread_line` is stored in the feature table as a benchmark only; it is never
-fed to the model.
+fed to the model. `mkt_prob` is a different thing and *is* a feature — see
+below.
+
+## The market as a feature
+
+The closing line is the best-informed number available before kickoff, so the
+model reads it instead of pretending it does not exist. Three pieces:
+
+**No-vig consensus probability (`mkt_prob`).** Both sides of a moneyline imply
+probabilities that sum to more than 1; the excess is the book's margin (median
+2.5% here). Normalising by the sum removes it and leaves a fair win
+probability. nflverse carries closing moneylines for **100% of games
+2015–2025**, so this needed no API and no backfill — it was sitting in
+`load_schedules()` the whole time. It is now the third most important feature
+in the model, behind only the two Elo terms.
+
+Adding it moved the walk-forward numbers from 64.9%/.2206 to **65.7%/.2164**,
+and the ≥0.60 bucket from 69.7% to **71.6%**. Feeding the raw `spread_line`
+instead reaches a similar accuracy but is less stable season to season — the
+spread is a rounded, half-point-quantised summary of the same information, and
+the moneyline is the market's actual probability.
+
+**Every US book, for the price of one.** The Odds API bills
+`markets × regions`, *not* per bookmaker — verified against the
+`x-requests-last` response header, which returns 2 for a two-market,
+one-region call regardless of how many books answer. `fetch_spread_odds.py`
+used to pin `bookmakers=draftkings`; it now asks for `regions=us` and gets 8
+books at the same cost. The consensus is the **median** across books, so one
+stale or off-market price cannot drag it, and `spread_odds.csv` now records the
+best available price per side rather than DraftKings' price.
+
+**Line movement is a 2027 feature, not a 2026 one.** Sharp money shows up as
+the move from the opening number to the close, and this model only ever sees
+the endpoint. There is no free source for the other end: nflverse carries
+closing lines only, and ESPN's core-API `open`/`close` blocks come back `null`
+for every provider on past seasons (checked on 2023, all 14). Buying the
+backfill costs more credits than the plan holds. So `fetch_spread_odds.py` now
+**appends** every snapshot to `spread_odds_history.csv` instead of overwriting
+— one season of daily snapshots is the cheapest honest path to the feature.
+Nothing reads it yet, and nothing should until it covers a full season.
+
+## Gameday inactives
+
+The official injury report is filed Wednesday to Friday. The inactives list
+lands 90 minutes before kickoff, and the market moves on it while a model built
+on Friday's report is still guessing. Measured against snap counts, 2021–24:
+
+| Report status | Listings | Actually played |
+|---------------|----------|-----------------|
+| Out           | 4,078    | 0.0%            |
+| Doubtful      | 658      | 0.6%            |
+| **Questionable** | **6,120** | **63.3%**    |
+| not listed    | 12,221   | 88.7%           |
+
+That is **3.2 Questionable players per team per game and a coin flip on each** —
+40.6% for quarterbacks, the single most valuable unknown in the feature set.
+`QUESTIONABLE_WEIGHT = 0.37` is the right league-wide average and the wrong
+answer for any individual game.
+
+`fetch_inactives.py` closes that gap with ESPN's public scoreboard — no API key
+— which carries a per-team status block that flips to `Out` when inactives
+post. It writes `inactives.csv`; `features.py` reads it and counts a resolved
+player in full or not at all instead of at the average. An unresolved
+Questionable stays unresolved and keeps the 0.37 fallback, so the file can
+never make a game *worse* informed than it was.
+
+Two guards worth knowing about: the fetcher skips anything that is not
+`seasontype 2`, because a default August run would otherwise file preseason
+week 3 as regular-season week 3; and repeated runs merge by
+(season, week, team, player) with the newest status winning, so the Sunday
+11:45 run overwrites what Friday recorded.
 
 ## Player props (paper trading)
 

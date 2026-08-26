@@ -27,3 +27,9 @@ defender_ratings.csv
 positive_team_weeks.csv
 field_timing_team_weeks.csv
 props_projection_log.csv
+
+# Runtime market + availability snapshots (regenerated every run;
+# spread_odds_history.csv accumulates on the droplet only).
+market_consensus.csv
+spread_odds_history.csv
+inactives.csv

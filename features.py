@@ -70,6 +70,13 @@ IR_RECENT_WEEKS = 5
 # starter forces a backup AND shuffles the survivors' assignments — so count
 # STARTERS specifically (recent snap share at or above OL_STARTER_SHARE) and
 # flag the multi-out threshold separately.
+# The market's own win probability, with the vig removed, is the single
+# best-informed number available before kickoff. It enters as a feature
+# (mkt_prob), never as the answer — the model is free to disagree, and the
+# backtest decides whether disagreeing pays.
+MARKET_CONSENSUS_CSV = "market_consensus.csv"  # live consensus, fetch_spread_odds.py
+INACTIVES_CSV = "inactives.csv"                # gameday statuses, fetch_inactives.py
+
 OL_STARTER_SHARE = 0.6
 OL_MULTI_OUT = 2.0  # starters out at which a line is considered patched-together
 
@@ -142,11 +149,87 @@ def canon(team: str) -> str:
     return FRANCHISE.get(team, team)
 
 
+def american_to_prob(ml) -> float:
+    """American moneyline -> implied probability (still carries the vig)."""
+    ml = pd.to_numeric(ml, errors="coerce")
+    if pd.isna(ml):
+        return np.nan
+    return -ml / (-ml + 100.0) if ml < 0 else 100.0 / (ml + 100.0)
+
+
+def no_vig_home_prob(home_ml, away_ml) -> float:
+    """Fair home win probability from a two-way moneyline.
+
+    Both sides' implied probabilities sum to more than 1 — that excess is the
+    book's margin (median 2.5% in this data). Normalising by the sum removes
+    it proportionally, which is the standard fair-odds convention.
+    """
+    ph, pa = american_to_prob(home_ml), american_to_prob(away_ml)
+    if pd.isna(ph) or pd.isna(pa) or (ph + pa) <= 0:
+        return np.nan
+    return ph / (ph + pa)
+
+
+def load_market_consensus() -> dict:
+    """game_id -> live no-vig consensus home win probability.
+
+    Written by fetch_spread_odds.py from every US book The Odds API returns.
+    Fresher than the schedule's line and averaged across books, so it wins
+    where it exists; missing file or missing game falls back to nflverse.
+    """
+    if not os.path.exists(MARKET_CONSENSUS_CSV):
+        return {}
+    try:
+        df = pd.read_csv(MARKET_CONSENSUS_CSV)
+    except Exception:
+        return {}
+    if "game_id" not in df.columns or "mkt_prob" not in df.columns:
+        return {}
+    df = df[df["mkt_prob"].notna()]
+    return dict(zip(df["game_id"], df["mkt_prob"].astype(float)))
+
+
+def load_gameday_status() -> dict:
+    """(season, week, team) -> {normalized name: True if OUT, False if ACTIVE}.
+
+    The official injury report is filed Wednesday-Friday; the inactives list
+    lands 90 minutes before kickoff. Between the two, a Questionable player is
+    a coin flip (63% play, and only 41% for quarterbacks), which is all
+    QUESTIONABLE_WEIGHT can express. Once fetch_inactives.py has resolved a
+    player, he counts in full or not at all instead of at the league average.
+    """
+    if not os.path.exists(INACTIVES_CSV):
+        return {}
+    try:
+        df = pd.read_csv(INACTIVES_CSV)
+    except Exception:
+        return {}
+    need = {"season", "week", "team", "player", "is_out"}
+    if not need.issubset(df.columns):
+        return {}
+    status: dict = {}
+    for r in df.itertuples(index=False):
+        key = (int(r.season), int(r.week), canon(str(r.team)))
+        status.setdefault(key, {})[norm_name(str(r.player))] = bool(r.is_out)
+    return status
+
+
 def load_games() -> pd.DataFrame:
     sched = nfl.load_schedules(list(range(FIRST_SEASON, LAST_SEASON + 1))).to_pandas()
     sched["home_team"] = sched["home_team"].map(canon)
     sched["away_team"] = sched["away_team"].map(canon)
     sched["gameday"] = pd.to_datetime(sched["gameday"])
+    # Market win probability, vig removed. nflverse carries closing moneylines
+    # for every completed game back to 2015 and posted lines for near-future
+    # weeks; the live consensus file overrides it when fresher.
+    sched["mkt_prob"] = [
+        no_vig_home_prob(h, a)
+        for h, a in zip(sched["home_moneyline"], sched["away_moneyline"])
+    ]
+    consensus = load_market_consensus()
+    if consensus:
+        live = sched["game_id"].map(consensus)
+        sched["mkt_prob"] = live.where(live.notna(), sched["mkt_prob"])
     sched = sched.sort_values(["gameday", "game_id"]).reset_index(drop=True)
     return sched
 
@@ -456,6 +539,7 @@ def build_features() -> pd.DataFrame:
     snaps = load_snap_index()
     player_values = load_player_value_index()
     ir_index, ir_latest = load_ir_index()
+    gameday_status = load_gameday_status()
 
     elo: dict[str, float] = {}
     season_of: dict[str, int] = {}
@@ -553,6 +637,18 @@ def build_features() -> pd.DataFrame:
                                     else DEFAULT_SNAP_SHARE)
         return wtd
 
+    def quest_weight(p: dict, season: int, week: int, team: str) -> float:
+        """How much of a Questionable player's value to subtract.
+
+        Once the inactives list is out he is known: 1.0 if he is sitting,
+        0.0 if he is playing. Before that, the measured league-wide sit rate
+        is the best available guess.
+        """
+        known = gameday_status.get((season, week, team), {}).get(p["norm"])
+        if known is None:
+            return QUESTIONABLE_WEIGHT
+        return 1.0 if known else 0.0
+
     def is_ol_starter(p: dict) -> bool:
         """Was this lineman a starter in his recent games? Linemen have no
         stat line, so playing time is the only public evidence of a starting
@@ -579,7 +675,7 @@ def build_features() -> pd.DataFrame:
             for p in rep.get("quest_players", []):
                 if (p["group"] == "ol" and p["norm"] not in counted
                         and is_ol_starter(p)):
-                    n += QUESTIONABLE_WEIGHT
+                    n += quest_weight(p, season, week, team)
                     counted.add(p["norm"])
         ir_players = ir_index.get((season, week, team))
         if ir_players is None:
@@ -628,7 +724,7 @@ def build_features() -> pd.DataFrame:
                         names.append((0.5, f'{p["pos"]} {p["name"]} (starter)'))
             for p in rep.get("quest_players", []):
                 if p["group"] in VALUE_GROUPS and p["gsis"]:
-                    val = QUESTIONABLE_WEIGHT * player_value(p)
+                    val = quest_weight(p, season, week, team) * player_value(p)
                     out_val[p["group"]] += val
                     counted.add(p["gsis"])
                     if val >= 0.5:
@@ -872,8 +968,11 @@ def build_features() -> pd.DataFrame:
             "home_lookahead": lookahead(home, away),
             "away_lookahead": lookahead(away, home),
             "home_low_stakes": low_stakes(home), "away_low_stakes": low_stakes(away),
-            # --- benchmark (NOT a model feature): Vegas closing spread ---
+            # --- market ---
+            # spread_line stays a benchmark only (train.py scores against it).
+            # mkt_prob IS a feature: the no-vig consensus win probability.
             "spread_line": g.spread_line,
+            "mkt_prob": g.mkt_prob,
             # --- target ---
             "home_win": (
                 np.nan if pd.isna(g.home_score) or g.home_score == g.away_score
@@ -1024,6 +1123,9 @@ FEATURES = [
     "home_def_epa8", "away_def_epa8", "def_epa8_diff",
     "home_clutch_off16", "home_clutch_def16",
     "away_clutch_off16", "away_clutch_def16", "clutch_net_diff",
+    # No-vig market consensus. NaN before 2015 and for unposted games;
+    # XGBoost splits on missingness natively, so no imputation.
+    "mkt_prob",
 ]
 
 # Candidate upset-indicator groups, ablation-tested by backtest_groups.py.

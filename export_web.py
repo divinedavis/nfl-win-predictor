@@ -228,12 +228,16 @@ def main() -> None:
             season[f"{side}_{g}_out_wt"].fillna(0) for g in POS_GROUPS
         ) + season[f"{side}_ir_wt"].fillna(0)
 
-    # Live spread juice per side (droplet fetch_spread_odds.py); games not in
-    # the snapshot fall back to standard -110 in the page.
+    # Best available spread price per side across every US book in the
+    # snapshot (droplet fetch_spread_odds.py); games not in the snapshot fall
+    # back to standard -110 in the page. A malformed or missing price is
+    # skipped rather than allowed to abort the whole export.
     spread_prices: dict = {}
     odds_path = Path("spread_odds.csv")
     if odds_path.exists():
         for r in pd.read_csv(odds_path).itertuples(index=False):
+            if pd.isna(r.price):
+                continue
             spread_prices.setdefault((r.home, r.away), {})[r.side] = int(r.price)
 
     # Key players per team for the expanded game panel: QB + top receivers +
