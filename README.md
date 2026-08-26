@@ -21,6 +21,9 @@ python3.12 -m venv .venv          # needs Homebrew python3.12+ (system 3.9 is to
 .venv/bin/python position_impact.py  # which position's injuries move win prob
 .venv/bin/python export_web.py    # rebuild web/index.html for the web app
 .venv/bin/python fetch_inactives.py  # ESPN gameday statuses -> inactives.csv
+.venv/bin/python fetch_kalshi.py     # Kalshi exchange prices (free, no key)
+.venv/bin/python fetch_espn_fpi.py   # ESPN FPI projections (--seasons 2015-2026)
+.venv/bin/python fpi_ablation.py     # is FPI worth promoting to a feature?
 .venv/bin/python clv.py --record     # lock in today's number vs the market
 .venv/bin/python clv.py --report     # closing line value to date
 ODDS_API_KEY=... .venv/bin/python fetch_spread_odds.py  # all US books, 2 credits
@@ -150,6 +153,7 @@ seasons. What has been tested so far —
 | **No-vig market probability** | `train.py` | **Promoted** — Brier .2206 → .2164, now the #3 feature |
 | Gameday inactives resolving Questionable | `fetch_inactives.py` | Shipped on measured need (63.3% of Q play); no backtest possible — ESPN does not retain past inactives |
 | **Early-season ATS edge (weeks 1-4)** | `clv.py` | **Live hypothesis** — 59.1% ATS at edge ≥3 (n=210), monotonic decay, corroborated by the win-totals decay; being measured by CLV, nothing staked |
+| ESPN FPI as a feature | `fpi_ablation.py` | **Not promoted** — Brier .2164 → .2162, better in only 6/11 seasons; display only. Corroborates the early-season effect, see below |
 
 The pattern: a feature wins only when it carries information Elo and rolling
 EPA could not already have absorbed through game results. The market feature is
@@ -324,6 +328,61 @@ Two guards worth knowing about: the fetcher skips anything that is not
 week 3 as regular-season week 3; and repeated runs merge by
 (season, week, team, player) with the newest status winning, so the Sunday
 11:45 run overwrites what Friday recorded.
+
+## What every market thinks
+
+Four opinions sit under each pick on the site — this model, the sportsbook
+consensus, Kalshi, and ESPN's FPI — drawn as bars on the same scale, with a
+line naming the disagreement when there is one. `sources.py` joins them all to
+`game_id`; any that is missing for a game is simply not shown.
+
+**They are not four independent votes.** Ten books is perhaps three or four
+real trading desks: the offshore ones largely copy, and `betonlineag` and
+`lowvig` are the same operator with different juice. Kalshi is genuinely
+separate — a CFTC-regulated exchange where orders match against each other
+rather than a house, with **no vig in the price**, so the midpoint is already
+a probability. FPI is a separate model built by separate people.
+
+| Source | Independent? | History? |
+|---|---|---|
+| Sportsbooks (10 via Odds API) | ~3–4 real desks | closing lines only |
+| Kalshi | yes | **2 weeks** — settled markets do not go back |
+| ESPN FPI | yes | **back to 2015** |
+
+### The Kalshi field-name trap
+
+Kalshi moved its numbers to decimal-string fields. The integer-cent keys
+(`yes_bid`, `last_price`, `volume`) still appear in every response and are
+**always `None`** — reading them yields an empty dataset with no error of any
+kind. Three probes looked like a dead market before `yes_bid_dollars`,
+`last_price_dollars`, and `orderbook_fp`/`count_fp` turned up. A book wider
+than 15 cents is dropped rather than guessed at: a yawning spread is nobody
+making a market, not a cheap edge.
+
+### FPI: tested, not promoted
+
+FPI is the only outside source with real history, so it is the only one that
+could be tested rather than merely displayed. It does not clear the bar:
+
+- **Horse race** — adding `fpi_home_prob` to `FEATURES` moves Brier .2164 →
+  .2162 and improves in only **6/11 seasons**. The rule in this repo is a clear
+  majority, so it stays out.
+- **Marginal information over the market** — all games +0.180 [−0.05, +0.46]
+  (inconclusive); **weeks 1–4 +0.758 [+0.24, +1.36], 100% of bootstrap draws
+  positive**; weeks 5+ +0.013 (nothing).
+- **Stacking it with the model and the market makes the bet worse.** A
+  leak-free stacked ensemble hits 63.5% in weeks 1–4 against the model's own
+  64.9%, and its ATS record on disagreements is 54.0% (n=63) against the
+  model's 59.1% (n=210). Better calibration, worse decisions.
+
+### Why it matters anyway
+
+FPI is a completely separate model, and it beats the market **only in weeks
+1–4** — exactly where this model does. That is a fourth independent line of
+evidence, and it changes what the finding means: the early-season edge is a
+property of **the market being soft**, not of this model being lucky. Two
+unrelated models both finding information the September line has missed is a
+much stronger claim than either one alone.
 
 ## Closing line value
 
