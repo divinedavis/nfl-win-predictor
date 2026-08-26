@@ -35,6 +35,8 @@ HISTORY_CSV = "spread_odds_history.csv"
 CONSENSUS_CSV = "market_consensus.csv"
 LOW_CREDIT_COST = 2      # markets x regions for this call
 LOW_CREDIT_WARN = 100    # below this, a props pull can no longer complete
+CREDIT_RESERVE = 10      # never spend the last few; leave room to act
+CREDIT_FILE = ".odds_credits"   # last known x-requests-remaining
 
 
 def american_to_prob(price: float) -> float:
@@ -55,10 +57,30 @@ def schedule_index() -> dict:
             for r in sched.itertuples(index=False)}
 
 
+def last_known_credits() -> int | None:
+    try:
+        with open(CREDIT_FILE) as f:
+            return int(f.read().strip())
+    except (OSError, ValueError):
+        return None
+
+
 def main() -> None:
     key = os.environ.get("ODDS_API_KEY")
     if not key:
         sys.exit("No ODDS_API_KEY set — spread payout math will fall back to -110.")
+
+    # Four gameday runs a week on top of the daily one is 22 credits a week for
+    # this call alone. Stop before zero rather than after it: the model reads
+    # nflverse moneylines when the consensus file is stale, so skipping costs
+    # freshness, while running dry costs every other job on the same key.
+    known = last_known_credits()
+    if known is not None and known - LOW_CREDIT_COST < CREDIT_RESERVE:
+        print(f"!!!!!!!!!! ALERT: {known} Odds API credits left, reserve is "
+              f"{CREDIT_RESERVE} — SKIPPING the market snapshot. Top up the plan "
+              f"or lower CREDIT_RESERVE. !!!!!!!!!!", file=sys.stderr)
+        sys.exit(0)
+
     r = requests.get(API, params={
         "apiKey": key, "regions": "us", "markets": "spreads,h2h",
         "oddsFormat": "american"}, timeout=30)
@@ -158,6 +180,9 @@ def main() -> None:
     # Say so while there is still time to act on it.
     remaining = r.headers.get("x-requests-remaining")
     try:
+        if remaining is not None:
+            with open(CREDIT_FILE, "w") as f:
+                f.write(str(int(remaining)))
         if remaining is not None and int(remaining) < LOW_CREDIT_WARN:
             print(f"!!!!!!!!!! ALERT: only {remaining} Odds API credits left "
                   f"({LOW_CREDIT_COST} per run here, ~640 per props pull) "

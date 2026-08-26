@@ -267,6 +267,13 @@ books at the same cost. The consensus is the **median** across books, so one
 stale or off-market price cannot drag it, and `spread_odds.csv` now records the
 best available price per side rather than DraftKings' price.
 
+**Credit guards.** This call costs 2 credits and now runs five times a week
+(daily plus four gameday windows) — 22 a week where it used to be 7. It warns
+below 100 remaining, and refuses to run at all with fewer than `CREDIT_RESERVE`
+(10) left, because the model falls back to nflverse moneylines when the
+consensus file is stale but every other job on the key dies when it hits zero.
+The last known balance is cached in `.odds_credits`.
+
 **Line movement is a 2027 feature, not a 2026 one.** Sharp money shows up as
 the move from the opening number to the close, and this model only ever sees
 the endpoint. There is no free source for the other end: nflverse carries

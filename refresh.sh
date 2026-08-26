@@ -30,8 +30,15 @@ alert() { echo "!!!!!!!!!! ALERT: $* !!!!!!!!!!"; }
 
   if [ "$MODE" = "--gameday" ]; then
     # Rebuild features so the resolved inactives and the fresh consensus reach
-    # the page, then republish. The model itself is unchanged.
+    # the page, then republish. The model itself is normally unchanged.
     $PY features.py
+    # ...unless FEATURES has moved since model.json was written, in which case
+    # skipping training would abort the export on a feature_names mismatch
+    # after the fetches had already run. Retrain instead of dying.
+    if ! $PY scripts/check_model_features.py; then
+      alert "model.json is stale for the current FEATURES — retraining on the gameday path"
+      $PY train.py | tail -4
+    fi
     $PY export_web.py
     $PY publish_results.py || echo "results publish failed (non-fatal)"
   else
