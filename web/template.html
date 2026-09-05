@@ -227,6 +227,20 @@
     font-family: system-ui, sans-serif; font-size: 0.7rem;
   }
   .others .more:hover { border-color: var(--field); color: var(--ink); }
+  /* Friends' picks, everyone mode: one card per game, one line per team. */
+  .tally {
+    border: 1px solid var(--line); border-radius: 10px; background: var(--surface);
+    padding: 10px 12px; display: grid; gap: 5px;
+  }
+  .tally .head { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; font-weight: 700; }
+  .tally .head .date { color: var(--muted); font-size: 0.76rem; font-weight: 500; white-space: nowrap; }
+  .tally .side { display: flex; gap: 8px; align-items: baseline; font-size: 0.85rem; min-width: 0; }
+  .tally .side .code { font-weight: 700; flex: 0 0 38px; }
+  .tally .side .n { color: var(--muted); font-size: 0.74rem; flex: 0 0 16px; text-align: right; }
+  .tally .side .names { color: var(--muted); min-width: 0; }
+  .tally .side .names b { color: var(--ink); font-weight: 600; }
+  .tally .side.won .code { color: var(--field); }
+  .tally .side.lost .code { opacity: 0.55; }
 
   .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 10px; margin: 14px 0; }
   .tile {
@@ -2148,21 +2162,64 @@
       '<button id="nextWk"' + (i === weeks.length - 1 ? " disabled" : "") + '>Wk ' + (i < weeks.length - 1 ? weeks[i + 1] : "") + " &rarr;</button></div>";
   }
 
+  // Everyone mode: each game in the week with the names behind each team.
+  // week_picks leaves the caller's own picks out, so they are folded back in
+  // here from the page's own copy, marked as you.
+  function everyoneByRef(week) {
+    const byRef = new Map();
+    const wk = othersByWeek.get(week);
+    if (wk && wk !== "loading") wk.forEach((v, k) => byRef.set(k, v.slice()));
+    if (session && profile) {
+      picks.forEach((v, k) => {
+        const bits = k.split(":");
+        if (bits[0] !== "game" || Number(bits[2]) !== week) return;
+        const ref = bits.slice(3).join(":");
+        if (!byRef.has(ref)) byRef.set(ref, []);
+        byRef.get(ref).push({ name: profile.display_name, choice: v.choice, me: true });
+      });
+    }
+    return byRef;
+  }
+
+  function renderEveryone(week) {
+    const wk = games.filter(g => g.week === week)
+      .sort((a, b) => (a.kick || a.date).localeCompare(b.kick || b.date) || gref(a).localeCompare(gref(b)));
+    const loading = othersByWeek.get(week) === "loading" || !othersByWeek.has(week);
+    const byRef = everyoneByRef(week);
+    const total = [...byRef.values()].reduce((n, v) => n + v.length, 0);
+    const people = new Set(); byRef.forEach(v => v.forEach(o => people.add(o.name)));
+    let html = weekNav(week);
+    if (loading) return html + '<p class="note">Loading everyone&rsquo;s picks&hellip;</p>';
+    html += '<p class="note">' + (total ? people.size + (people.size === 1 ? " person, " : " people, ") +
+      total + (total === 1 ? " pick" : " picks") + " in week " + week + "."
+      : "Nobody has picked a week " + week + " game yet.") + "</p>";
+    const side = (g, t) => {
+      const who = (byRef.get(gref(g)) || []).filter(o => o.choice === t);
+      const cls = played(g) ? (winner(g) === t ? " won" : " lost") : "";
+      return '<div class="side' + cls + '"><span class="code">' + t + "</span>" +
+        '<span class="n">' + (who.length || "") + "</span>" +
+        '<span class="names">' + (who.length ? who.map(o => o.me
+          ? "<b>" + esc(o.name) + " (you)</b>" : esc(o.name)).join(", ") : "&mdash;") +
+        "</span></div>";
+    };
+    html += '<div class="games">' + wk.map(g => '<div class="tally">' +
+      '<div class="head"><span>' + g.away + " @ " + g.home +
+      (played(g) ? ' <span class="date">' + g.awayScore + "&ndash;" + g.homeScore + "</span>" : "") +
+      '</span><span class="date">' + fmtDate(g.date) + "</span></div>" +
+      side(g, g.away) + side(g, g.home) + "</div>").join("") + "</div>";
+    return html;
+  }
+
   function renderFriends() {
     if (players === null) return '<p class="note">Loading players&hellip;</p>';
-    if (!players.length) {
-      return '<p class="note">Nobody has made a pick and put themselves on the ' +
-        "leaderboard yet.</p>";
-    }
-    let html = '<div class="sharebar"><label class="lbl" for="friendSel">Player</label> ' +
+    let html = '<div class="sharebar"><label class="lbl" for="friendSel">Show</label> ' +
       '<select class="search" id="friendSel" aria-label="Whose picks to show">' +
-      '<option value="">Pick a player&hellip;</option>' +
+      '<option value="">Everyone, game by game</option>' +
       players.map(pl => '<option value="' + esc(pl.share_id) + '"' +
         (pl.share_id === friend ? " selected" : "") + ">" + esc(pl.display_name) + "</option>").join("") +
       "</select></div>";
     if (!friend) {
-      return html + '<p class="note">Everyone who has put themselves on the leaderboard ' +
-        "and made at least one pick. Choose one to see who they took, week by week.</p>";
+      return html + renderEveryone(friendWeek === null ? curWeek : friendWeek);
     }
     if (friendCard === null) return html + '<p class="note">Loading&hellip;</p>';
     if (friendCard === "missing") {
@@ -2312,6 +2369,7 @@
       if (next) next.onclick = () => { curWeek += 1; render(); };
     }
     if (view === "friends") {
+      if (!friend) loadOthers(friendWeek === null ? curWeek : friendWeek);
       const sel = document.getElementById("friendSel");
       if (sel) sel.onchange = () => openFriend(sel.value || null);
       const week = friendWeek === null ? curWeek : friendWeek;
