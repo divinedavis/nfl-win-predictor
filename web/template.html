@@ -214,6 +214,19 @@
   .pickbtn:focus-visible { outline: 2px solid var(--field); outline-offset: 1px; }
   .pickbtn[aria-pressed="true"] { background: var(--field); border-color: var(--field); color: #fff; }
   .pickrow .lbl { text-transform: none; letter-spacing: 0; font-weight: 500; }
+  /* How other people called this game: three names at a time, one small line. */
+  .others {
+    grid-column: 1 / -1;
+    display: flex; flex-wrap: wrap; align-items: center; gap: 3px 9px;
+    margin-top: 6px; font-size: 0.74rem; color: var(--muted);
+  }
+  .others .code { font-weight: 700; color: var(--ink); }
+  .others .more {
+    border: 1px solid var(--line); background: transparent; color: var(--muted);
+    border-radius: 999px; padding: 1px 8px; cursor: pointer;
+    font-family: system-ui, sans-serif; font-size: 0.7rem;
+  }
+  .others .more:hover { border-color: var(--field); color: var(--ink); }
 
   .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 10px; margin: 14px 0; }
   .tile {
@@ -1739,7 +1752,54 @@
   const gamePickStrip = g => pickStrip("game", g.week, gref(g),
     [{ value: g.away, label: g.away }, { value: g.home, label: g.home }],
     "who wins?", null, lockedGame(g),
-    teams[g.away].name + " at " + teams[g.home].name);
+    teams[g.away].name + " at " + teams[g.home].name) + othersLine(g);
+
+  // ---- what everyone else picked ---------------------------------------
+  // One small line under each game with three other people's calls, and a
+  // "+N" that turns to the next three. Loaded once per week, signed in or
+  // not, from a function that returns nothing but display names and picks
+  // — and leaves the caller's own picks out (supabase/migrations/0005).
+  let othersByWeek = new Map();    // week -> Map("AWAY@HOME" -> [{name, choice}]) | "loading"
+  let othersPage = new Map();      // "week:ref" -> which group of three is showing
+  const OTHERS_PER_PAGE = 3;
+
+  function loadOthers(week) {
+    if (!SB_PROVIDERS.length || othersByWeek.has(week)) return;
+    othersByWeek.set(week, "loading");
+    publicRpc("week_picks", { season_: DATA.season, week_: week }).then(rows => {
+      const byRef = new Map();
+      (rows || []).forEach(r => {
+        if (r.kind !== "game") return;
+        if (!byRef.has(r.ref)) byRef.set(r.ref, []);
+        byRef.get(r.ref).push({ name: r.display_name, choice: r.choice });
+      });
+      othersByWeek.set(week, byRef);
+      render();
+    }).catch(() => {
+      // Nothing to show is the same as nobody having picked; try again next
+      // time the week is drawn rather than leaving a permanent hole.
+      othersByWeek.delete(week);
+    });
+  }
+
+  function othersLine(g) {
+    const wk = othersByWeek.get(g.week);
+    if (!wk || wk === "loading") return "";
+    const all = wk.get(gref(g)) || [];
+    if (!all.length) return "";
+    const key = g.week + ":" + gref(g);
+    const pages = Math.ceil(all.length / OTHERS_PER_PAGE);
+    const page = (othersPage.get(key) || 0) % pages;
+    const shown = all.slice(page * OTHERS_PER_PAGE, (page + 1) * OTHERS_PER_PAGE);
+    const rest = all.length - OTHERS_PER_PAGE;
+    return '<div class="others" title="How other people on Sputter Bets called this game">' +
+      '<span>&#128101;</span>' +
+      shown.map(o => "<span>" + esc(o.name) + ' <span class="code">' +
+        esc(o.choice) + "</span></span>").join("") +
+      (rest > 0 ? '<button class="more" data-more="' + esc(key) + '" aria-label="Show the next ' +
+        OTHERS_PER_PAGE + ' people">+' + rest + "</button>" : "") +
+      "</div>";
+  }
 
   function propPickStrip(pl, week, statKey) {
     const g = propGame(pl, week);
@@ -2148,6 +2208,13 @@
       : view === "qb" && DATA.qb ? renderQb()
       : view === "saved" ? renderSaved()
       : selected ? renderTeam(selected) : renderWeek(curWeek);
+    if (view === "games") {
+      // Fetch the other people's picks for whatever weeks are on screen; the
+      // week view is one call, a team's schedule is one per week, all cached.
+      (selected ? [...new Set(games.filter(g => g.home === selected || g.away === selected)
+                                     .map(g => g.week))] : [curWeek])
+        .forEach(loadOthers);
+    }
     if (view === "games" && !selected) {
       const prev = document.getElementById("prevWk"), next = document.getElementById("nextWk");
       if (prev) prev.onclick = () => { curWeek -= 1; render(); };
@@ -2299,6 +2366,14 @@
       const d = pb.dataset;
       setPick(d.pick, Number(d.week), d.ref, d.choice,
               d.line === undefined ? null : Number(d.line), d.label);
+      return;
+    }
+    const more = e.target.closest("[data-more]");
+    if (more) {
+      e.stopPropagation();
+      const k = more.dataset.more;
+      othersPage.set(k, (othersPage.get(k) || 0) + 1);
+      render();
       return;
     }
     const star = e.target.closest("[data-track]");
