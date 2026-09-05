@@ -575,6 +575,7 @@
       <h1>Sputter Bets <span class="season" id="seasonLabel"></span></h1>
       <span class="tagline display" id="genLabel"></span>
       <button class="authbtn" id="myPicksBtn">My picks</button>
+      <button class="authbtn" id="friendsBtn">Friends&rsquo; picks</button>
       <button class="authbtn" id="authBtn" hidden></button>
     </div>
   </header>
@@ -1640,6 +1641,10 @@
   let profile = null;              // {display_name, share_id, is_public}
   let board = null;                // leaderboard rows, loaded on demand
   let sharedCard = null;           // someone else's card, from ?u=
+  let players = null;              // [{display_name, share_id}] for Friends' picks
+  let friend = null;               // share_id of the player being looked at
+  let friendCard = null;           // their card, null while loading, "missing" if gone
+  let friendWeek = null;           // which week of theirs is showing
 
   const STAT_NAMES = {};
   ((DATA.props || {}).stats || []).forEach(st => { STAT_NAMES[st.key] = st.label; });
@@ -2076,16 +2081,9 @@
     }
     if (!sharedCard) return '<p class="note">Loading&hellip;</p>';
     const c = sharedCard;
-    const rows = (c.picks || []).map(r => {
-      const line = r.line === null ? null : Number(r.line);
-      const actual = r.actual === null || r.actual === undefined ? null : Number(r.actual);
-      // The function returns hit = null for a push as well as for a pending
-      // pick; the line and the actual tell the two apart.
-      const push = actual !== null && line !== null && actual === line;
-      return { kind: r.kind, week: r.week, ref: r.ref, choice: r.choice,
-               line: line, label: r.label, actual: actual,
-               verdict: push ? "push" : r.hit };
-    });
+    // The function returns hit = null for a push as well as for a pending
+    // pick; cardRows tells the two apart from the line and the actual.
+    const rows = cardRows(c);
     const pushes = rows.filter(r => r.verdict === "push").length;
     return '<div class="tiles">' +
       tile(esc(c.display_name), "picks on Sputter Bets") +
@@ -2099,6 +2097,96 @@
       '<p class="note">Somebody else&rsquo;s card. Nothing is staked on any of ' +
       'this &mdash; <a href="' + location.pathname + '">open the week&rsquo;s ' +
       "predictions</a> to make your own calls.</p>";
+  }
+
+  // ---- friends' picks ---------------------------------------------------
+  // Pick a player from everyone on the leaderboard and page through their
+  // calls week by week. Same card the share link opens — shared_card — so
+  // it carries the same record and the same server-graded verdicts.
+  async function loadPlayers() {
+    if (players !== null) return;
+    try {
+      players = await publicRpc("players", {});
+    } catch (e) {
+      players = [];
+      toast("Could not load the player list.");
+    }
+    render();
+  }
+
+  async function openFriend(shareId) {
+    friend = shareId;
+    friendCard = null;
+    render();
+    if (!shareId) return;
+    try {
+      const rows = await publicRpc("shared_card", { share: shareId });
+      friendCard = rows && rows.length ? rows[0] : "missing";
+    } catch (e) {
+      friendCard = "missing";
+    }
+    if (friend === shareId) render();
+  }
+
+  function cardRows(c) {
+    return (c.picks || []).map(r => {
+      const line = r.line === null ? null : Number(r.line);
+      const actual = r.actual === null || r.actual === undefined ? null : Number(r.actual);
+      const push = actual !== null && line !== null && actual === line;
+      return { kind: r.kind, week: r.week, ref: r.ref, choice: r.choice,
+               line: line, label: r.label, actual: actual,
+               verdict: push ? "push" : r.hit };
+    });
+  }
+
+  function weekNav(week) {
+    const weeks = [...new Set(games.map(g => g.week))].sort((a, b) => a - b);
+    const i = weeks.indexOf(week);
+    return '<div class="weeknav">' +
+      '<button id="prevWk"' + (i <= 0 ? " disabled" : "") + '>&larr; Wk ' + (i > 0 ? weeks[i - 1] : "") + "</button>" +
+      '<span class="wk display">Week ' + week + "</span>" +
+      '<button id="nextWk"' + (i === weeks.length - 1 ? " disabled" : "") + '>Wk ' + (i < weeks.length - 1 ? weeks[i + 1] : "") + " &rarr;</button></div>";
+  }
+
+  function renderFriends() {
+    if (players === null) return '<p class="note">Loading players&hellip;</p>';
+    if (!players.length) {
+      return '<p class="note">Nobody has made a pick and put themselves on the ' +
+        "leaderboard yet.</p>";
+    }
+    let html = '<div class="sharebar"><label class="lbl" for="friendSel">Player</label> ' +
+      '<select class="search" id="friendSel" aria-label="Whose picks to show">' +
+      '<option value="">Pick a player&hellip;</option>' +
+      players.map(pl => '<option value="' + esc(pl.share_id) + '"' +
+        (pl.share_id === friend ? " selected" : "") + ">" + esc(pl.display_name) + "</option>").join("") +
+      "</select></div>";
+    if (!friend) {
+      return html + '<p class="note">Everyone who has put themselves on the leaderboard ' +
+        "and made at least one pick. Choose one to see who they took, week by week.</p>";
+    }
+    if (friendCard === null) return html + '<p class="note">Loading&hellip;</p>';
+    if (friendCard === "missing") {
+      return html + '<p class="note">That player has switched their card off.</p>';
+    }
+    const c = friendCard;
+    const all = cardRows(c);
+    const week = friendWeek === null ? curWeek : friendWeek;
+    const rows = all.filter(r => r.week === week)
+      .sort((a, b) => a.kind.localeCompare(b.kind) || a.ref.localeCompare(b.ref));
+    const t = tally(rows);
+    const pushes = all.filter(r => r.verdict === "push").length;
+    html += '<div class="tiles">' +
+      tile(esc(c.display_name), "season: " + c.wins + "&ndash;" + c.losses +
+           (c.pct === null ? "" : " (" + Number(c.pct).toFixed(1) + "%)") +
+           " &middot; " + (c.pending - pushes) + " pending") +
+      tile(t.wins + "&ndash;" + t.losses, "week " + week + " record") +
+      tile(rows.length, "week " + week + (rows.length === 1 ? " pick" : " picks")) +
+      "</div>" + weekNav(week);
+    html += rows.length
+      ? '<div class="games">' + rows.map(r => pickLine(r, "them")).join("") + "</div>"
+      : '<p class="note">No picks from ' + esc(c.display_name) + " for week " + week + ".</p>";
+    return html + '<p class="note">Records are counted in the database against ' +
+      "published results. Nothing is staked on any of this.</p>";
   }
 
   function renderSaved() {
@@ -2164,6 +2252,7 @@
     { v: "saved", label: "My tracking", on: () => SB_PROVIDERS.length > 0 },
     { v: "picks", label: "My picks", on: () => SB_PROVIDERS.length > 0 },
     { v: "board", label: "Leaderboard", on: () => SB_PROVIDERS.length > 0 },
+    { v: "friends", label: "Friends\u2019 picks", on: () => SB_PROVIDERS.length > 0 },
     // Only ever the current view, never something to navigate to.
     { v: "shared", label: "Somebody's picks", on: () => view === "shared" },
   ];
@@ -2188,6 +2277,7 @@
     view = next;
     selected = null;
     render();
+    if (next === "friends") loadPlayers();
     if (next === "board" && board === null) {
       try {
         board = await publicRpc("leaderboard", { min_picks: 3, limit_n: 50 });
@@ -2204,6 +2294,7 @@
     main.innerHTML = view === "shared" ? renderShared()
       : view === "picks" ? renderPicks()
       : view === "board" ? renderBoard()
+      : view === "friends" ? renderFriends()
       : view === "props" && DATA.props ? renderProps()
       : view === "qb" && DATA.qb ? renderQb()
       : view === "saved" ? renderSaved()
@@ -2219,6 +2310,14 @@
       const prev = document.getElementById("prevWk"), next = document.getElementById("nextWk");
       if (prev) prev.onclick = () => { curWeek -= 1; render(); };
       if (next) next.onclick = () => { curWeek += 1; render(); };
+    }
+    if (view === "friends") {
+      const sel = document.getElementById("friendSel");
+      if (sel) sel.onchange = () => openFriend(sel.value || null);
+      const week = friendWeek === null ? curWeek : friendWeek;
+      const prev = document.getElementById("prevWk"), next = document.getElementById("nextWk");
+      if (prev) prev.onclick = () => { friendWeek = week - 1; render(); };
+      if (next) next.onclick = () => { friendWeek = week + 1; render(); };
     }
     if (view === "props" && DATA.props) {
       const box = document.getElementById("propSearch");
@@ -2330,6 +2429,7 @@
   const viewSel = document.getElementById("viewSel");
   viewSel.onchange = () => showView(viewSel.value);
   document.getElementById("myPicksBtn").onclick = () => showView("picks");
+  document.getElementById("friendsBtn").onclick = () => showView("friends");
 
   // Rows expand inline (key players); the analysis bullets open in a modal
   // via the ⓘ button. One delegated handler for both.
