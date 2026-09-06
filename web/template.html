@@ -362,6 +362,9 @@
     font-size: 0.85rem; color: var(--muted);
   }
   .why li::marker { color: var(--field); }
+  /* Key players: player on the bullet, one fact per sub-bullet. */
+  .why ul ul { margin-top: 3px; gap: 2px; padding-left: 16px; font-size: 0.82rem; }
+  .why ul ul li::marker { color: var(--muted); }
   .why li b { color: var(--ink); font-weight: 600; }
   /* Outside opinions on the same game, one row per source. */
   .srcs { display: flex; flex-direction: column; gap: 6px; margin-top: 2px; }
@@ -902,31 +905,33 @@
   }
 
   function playerLine(p) {
+    // One bullet per player, one sub-bullet per fact. The single-line form
+    // wrapped into a wall of dots and arrows; a reader wants to scan down.
     const st = p.st === "OUT" || p.st === "IR"
       ? ' <span class="badge alert">' + p.st + "</span>"
       : p.st === "Q" ? ' <span class="badge starred">Q</span>' : "";
-    let vs = "";
-    if (p.vsN > 0 && p.vsA != null) {
-      vs = " &middot; vs this D: avg " + p.vsA + " in " + p.vsN +
-        (p.vsN > 1 ? " games" : " game");
-      if (p.vsN >= 2 && p.car != null)
-        vs += p.vsA > p.car ? " — <b>runs high</b> vs them (career " + p.car + ")"
-                            : " — <b>runs low</b> vs them (career " + p.car + ")";
-    }
-    let veg = "";
+    const facts = [];
+    facts.push("Projection: <b>" + p.v + "</b> " + p.u);
     if (p.vl != null) {
-      veg = " &middot; Vegas " + p.vl + " &rarr; model <b>" + p.lean +
-        "</b> (" + Math.round(p.lp * 100) + "%)";
+      facts.push("Vegas line: " + p.vl + " &rarr; model <b>" + p.lean +
+        "</b> (" + Math.round(p.lp * 100) + "%)");
     }
     // What he actually did last time out, so the projection has a reference
     // point. In week 1 this is last season's finale, labelled with the year.
-    let last = "";
     if (p.lg != null) {
-      last = " &middot; last game <b>" + p.lg + "</b> " + p.u +
-        " (" + p.lgWhen + (p.lgOpp ? " vs " + p.lgOpp : "") + ")";
+      facts.push("Last game: <b>" + p.lg + "</b> " + p.u + " &middot; " +
+        p.lgWhen + (p.lgOpp ? " vs " + p.lgOpp : ""));
     }
-    return "<li><b>" + p.n + "</b> " + p.pos + st +
-      " — proj " + p.v + " " + p.u + veg + last + vs + "</li>";
+    if (p.vsN > 0 && p.vsA != null) {
+      let vs = "Vs this D: avg <b>" + p.vsA + "</b> in " + p.vsN +
+        (p.vsN > 1 ? " games" : " game");
+      if (p.vsN >= 2 && p.car != null)
+        vs += p.vsA > p.car ? " &middot; <b>runs high</b> vs them (career " + p.car + ")"
+                            : " &middot; <b>runs low</b> vs them (career " + p.car + ")";
+      facts.push(vs);
+    }
+    return "<li><b>" + p.n + "</b> " + p.pos + st + "<ul>" +
+      facts.map(f => "<li>" + f + "</li>").join("") + "</ul></li>";
   }
 
   // ---- what everyone thinks ----
