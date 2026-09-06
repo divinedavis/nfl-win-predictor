@@ -132,7 +132,11 @@ class Teams:
             r = self.rows[tid]
             ab = str(r.abbreviation or "").upper() or f"T{tid}"
             if ab in taken:
-                ab = f"{ab}{str(tid)[-2:]}"
+                # Southern, Southern Oregon and Southeastern all say "SOU":
+                # tag the collisions with the nickname's initial (SOUJ for
+                # the Jaguars) so the page shows a code a reader can parse.
+                mascot = str(r.name) if isinstance(r.name, str) else ""
+                ab = f"{ab}{mascot[:1].upper() or 'X'}"
                 while ab in taken:
                     ab += "X"
             taken.add(ab)
@@ -265,6 +269,63 @@ def load_schedule(refresh: bool = True) -> pd.DataFrame:
         df[c] = df[c].astype(int)
     df["game_type"] = df["season_type"].map({2: "REG", 3: "POST"})
     return df.sort_values(["game_date", "game_id"]).reset_index(drop=True)
+
+
+SUMMARY = ("https://site.api.espn.com/apis/site/v2/sports/football/"
+           "college-football/summary")
+BOX_CATS = {"passing": ("completions/passingAttempts", "passingYards"),
+            "rushing": ("rushingAttempts", "rushingYards"),
+            "receiving": ("receptions", "receivingYards")}
+
+
+def summary_box(game_id: int, refresh: bool = True) -> list:
+    """Per-player passing/rushing/receiving lines for one FINAL game from
+    ESPN's summary endpoint, in the player-box release's column shape.
+    Cached forever once the game is final; an unfinished game is not
+    cached and returns nothing, so a Saturday-night snapshot never lands."""
+    CACHE.mkdir(exist_ok=True)
+    path = CACHE / f"summary_{game_id}.json"
+    if not path.exists():
+        if not refresh:
+            return []
+        try:
+            r = requests.get(SUMMARY, params={"event": game_id}, timeout=TIMEOUT)
+            time.sleep(0.2)
+        except requests.RequestException:
+            return []
+        if r.status_code != 200:
+            return []
+        d = r.json()
+        st = ((d.get("header", {}).get("competitions") or [{}])[0]
+              .get("status", {}).get("type", {}).get("name", ""))
+        if st != "STATUS_FINAL":
+            return []
+        path.write_text(r.text)
+    d = json.loads(path.read_text())
+    rows = []
+    for t in d.get("boxscore", {}).get("players", []):
+        tid = int(t["team"]["id"])
+        for cat in t.get("statistics", []):
+            if cat.get("name") not in BOX_CATS:
+                continue
+            labels = cat.get("labels", [])
+            use_col, yds_col = BOX_CATS[cat["name"]]
+            try:
+                i_use = labels.index("C/ATT" if cat["name"] == "passing" else
+                                     "CAR" if cat["name"] == "rushing" else "REC")
+                i_yds = labels.index("YDS")
+            except ValueError:
+                continue
+            for a in cat.get("athletes", []):
+                stats = a.get("stats", [])
+                if len(stats) <= max(i_use, i_yds):
+                    continue
+                rows.append({"game_id": game_id, "team_id": tid,
+                             "athlete_id": int(a["athlete"]["id"]),
+                             "athlete_name": a["athlete"].get("displayName", ""),
+                             "category": cat["name"],
+                             use_col: stats[i_use], yds_col: stats[i_yds]})
+    return rows
 
 
 def load_team_games(refresh: bool = True) -> pd.DataFrame:

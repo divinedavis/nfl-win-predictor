@@ -19,7 +19,7 @@ import pandas as pd
 from xgboost import XGBRegressor
 
 from cfb.data import (LAST_SEASON, Teams, load, load_injuries,
-                      load_schedule)
+                      load_schedule, summary_box)
 
 FIRST_SEASON = 2013         # enough history for the quantile models
 WINDOW_DAYS = 8          # project every team's next game inside this window
@@ -52,12 +52,43 @@ def load_player_weeks(refresh: bool = True) -> pd.DataFrame:
     pb = load("player_box", range(FIRST_SEASON, LAST_SEASON + 1), refresh,
               columns=["season", "game_id", "team_id", "athlete_id", "athlete_name",
                        "category", "completions/passingAttempts", "passingYards",
-                       "rushingAttempts", "rushingYards", "receptions", "receivingYards"])
+                       "rushingAttempts", "rushingYards", "receptions", "receivingYards",
+                       "stat_1", "stat_2"])
     pb = pb[pb["category"].isin(["passing", "rushing", "receiving"])].copy()
+    # The release leaves passing lines in the generic stat_1 (C/ATT) and
+    # stat_2 (YDS) slots for most 2026 rows and some earlier ones; the named
+    # columns are NaN there, which read as a QB who threw for nothing.
+    if "stat_1" in pb.columns:
+        isp = pb["category"] == "passing"
+        for named, generic in (("completions/passingAttempts", "stat_1"),
+                               ("passingYards", "stat_2")):
+            pb.loc[isp, named] = pb.loc[isp, named].where(
+                pb.loc[isp, named].notna(), pb.loc[isp, generic])
+        pb = pb.drop(columns=["stat_1", "stat_2"])
     pb["athlete_id"] = _num(pb["athlete_id"]).astype("Int64")
     pb["team_id"] = _num(pb["team_id"]).astype("Int64")
     pb["game_id"] = _num(pb["game_id"]).astype("Int64")
     pb = pb.dropna(subset=["athlete_id", "team_id", "game_id"])
+
+    # The current season's release is a Saturday-night snapshot: half its
+    # rows are mid-game and stay that way for days. Replace the whole season
+    # with ESPN's own box score for every game the scoreboard calls final.
+    sched = load_schedule(refresh)
+    cur = sched[(sched["season"] == LAST_SEASON) & (sched["status"] == "STATUS_FINAL")]
+    fresh = []
+    for gid in cur["game_id"].astype(int):
+        fresh.extend(summary_box(gid, refresh))
+    if fresh:
+        fb = pd.DataFrame(fresh)
+        fb["season"] = LAST_SEASON
+        for c in pb.columns:
+            if c not in fb.columns:
+                fb[c] = np.nan
+        pb = pd.concat([pb[pb["season"] != LAST_SEASON], fb[pb.columns]], ignore_index=True)
+        for c in ("athlete_id", "team_id", "game_id"):
+            pb[c] = _num(pb[c]).astype("Int64")
+        print(f"Player box: {LAST_SEASON} replaced by ESPN final box scores "
+              f"for {fb.game_id.nunique()} games")
     ca = pb["completions/passingAttempts"].astype(str).str.split("/", expand=True)
     pb["attempts"] = _num(ca[1]) if ca.shape[1] > 1 else np.nan
     pb["passing_yards"] = _num(pb["passingYards"])
@@ -74,7 +105,6 @@ def load_player_weeks(refresh: bool = True) -> pd.DataFrame:
     for c in ("game_id", "team_id", "athlete_id"):
         ps[c] = ps[c].astype(int)
 
-    sched = load_schedule(refresh)
     sched = sched[sched["home_win"].notna()] if "home_win" in sched else sched
     keep = ["game_id", "season", "week", "game_type", "game_date", "home_id", "away_id"]
     home = sched[keep].copy()
@@ -239,6 +269,13 @@ def project(refresh: bool = True) -> None:
 
         last = d.groupby("athlete_id").tail(1)
         recent = last[last["season"] >= LAST_SEASON - 1]
+        # Teams that have played this season, and who played for them: a
+        # player whose team has taken the field without him and who is not
+        # on its roster has moved on (draft, portal, graduation).
+        this_season = ps[ps["season"] == LAST_SEASON]
+        teams_played = set(this_season["team_id"])
+        played_this_season = set(this_season["athlete_id"])
+        team_last_week = this_season.groupby("team_id")["week"].max().to_dict()
         # The starter at QB: whoever threw the most in the team's last game.
         qb1 = {}
         if stat == "passing_yards":
@@ -251,6 +288,10 @@ def project(refresh: bool = True) -> None:
             team_now = cur_team.get(int(r.athlete_id), int(r.team_id))
             if team_now not in opp_of:
                 continue  # bye, or not on the slate
+            pid = int(r.athlete_id)
+            idle = team_now in teams_played and pid not in played_this_season
+            if idle and pid not in cur_team:
+                continue  # gone: the team played on without him
             if stat == "passing_yards" and qb1.get(team_now) not in (None, int(r.athlete_id)):
                 continue
             h = d[d.athlete_id == r.athlete_id]
@@ -285,6 +326,8 @@ def project(refresh: bool = True) -> None:
                               for v in vs.tail(5).itertuples(index=False))
             lg = h.iloc[-1]
             status = "OUT" if str(r.athlete_name).lower() in out_by_team.get(team_now, set()) else ""
+            if not status and idle:
+                status = f"DNP wk {team_last_week[team_now]}"
             out_rows.append({
                 "season": LAST_SEASON, "week": week, "stat": stat,
                 "player_id": int(r.athlete_id), "player": r.athlete_name,
