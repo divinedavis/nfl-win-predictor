@@ -535,6 +535,7 @@ def project() -> None:
                 "p90": round(q[4], 1),
                 "vs_opp_n": len(vs),
                 "vs_opp_avg": round(float(vs["y"].mean()), 1) if len(vs) else None,
+                "vs_opp_med": round(float(vs["y"].median()), 1) if len(vs) else None,
                 "vs_opp_log": vs_log,
                 "career_avg": round(float(h["y"].mean()), 1),
                 "last_yds": round(float(lg.y), 0),

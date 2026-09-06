@@ -185,6 +185,7 @@ def props_payload():
             "status": getattr(r, "status", "") or "",
             "vsN": int(getattr(r, "vs_opp_n", 0) or 0),
             "vsAvg": _f(getattr(r, "vs_opp_avg", None), 1),
+            "vsMed": _f(getattr(r, "vs_opp_med", None), 1),
             "vsLog": getattr(r, "vs_opp_log", "") or "",
             "carAvg": _f(getattr(r, "career_avg", None), 1),
             **_last_game(r),
@@ -320,6 +321,7 @@ def main() -> None:
                 "v": _f(r.p50, 0), "st": (r.status if isinstance(r.status, str)
                                           else "") or "",
                 "vsN": int(r.vs_opp_n or 0), "vsA": _f(r.vs_opp_avg, 1),
+                "vsM": _f(getattr(r, "vs_opp_med", None), 1),
                 "car": _f(r.career_avg, 1),
                 **_last_game(r),
             }

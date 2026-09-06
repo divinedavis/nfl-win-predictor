@@ -923,8 +923,11 @@
         p.lgWhen + (p.lgOpp ? " vs " + p.lgOpp : ""));
     }
     if (p.vsN > 0 && p.vsA != null) {
-      let vs = "Vs this D: avg <b>" + p.vsA + "</b> in " + p.vsN +
-        (p.vsN > 1 ? " games" : " game");
+      // Median next to the mean once there are enough games for them to
+      // differ: one 150-yard day can drag a 4-game average a long way.
+      let vs = "Vs this D: avg <b>" + p.vsA + "</b>" +
+        (p.vsN >= 2 && p.vsM != null ? ", median <b>" + p.vsM + "</b>" : "") +
+        " in " + p.vsN + (p.vsN > 1 ? " games" : " game");
       if (p.vsN >= 2 && p.car != null)
         vs += p.vsA > p.car ? " &middot; <b>runs high</b> vs them (career " + p.car + ")"
                             : " &middot; <b>runs low</b> vs them (career " + p.car + ")";
@@ -1133,7 +1136,8 @@
       const tilt = p.vsN >= 2 && p.carAvg
         ? (p.vsAvg > p.carAvg ? " — runs high vs them" : " — runs low vs them") : "";
       hist = '<div class="sub" title="' + p.vsLog.replaceAll(";", " · ") + '">vs ' +
-        p.opp + ": avg " + p.vsAvg + " in " + p.vsN +
+        p.opp + ": avg " + p.vsAvg +
+        (p.vsN >= 2 && p.vsMed != null ? ", median " + p.vsMed : "") + " in " + p.vsN +
         (p.vsN > 1 ? " games" : " game") +
         (p.carAvg ? " (career " + p.carAvg + ")" : "") + tilt + "</div>";
     }
