@@ -77,9 +77,13 @@ def _last_game(r) -> dict:
     if y is None or pd.isna(y):
         return {}
     ls, lw = int(r.last_season), int(r.last_week)
-    # Weeks past 18 are the postseason; call the round by name.
-    wk = {19: "wild card", 20: "divisional", 21: "conf champ",
-          22: "Super Bowl"}.get(lw, f"wk {lw}")
+    # Weeks past 18 are the postseason; call the round by name. College
+    # numbers its postseason from 1 again, flagged by last_post.
+    if int(getattr(r, "last_post", 0) or 0):
+        wk = "bowl/playoff"
+    else:
+        wk = {19: "wild card", 20: "divisional", 21: "conf champ",
+              22: "Super Bowl"}.get(lw, f"wk {lw}")
     when = wk if ls == int(r.season) else f"'{ls % 100} {wk}"
     opp = r.last_opp if isinstance(r.last_opp, str) else ""
     return {"lg": int(y), "lgWhen": when, "lgOpp": opp}
@@ -519,11 +523,23 @@ def main() -> None:
             "f": factors,
         })
 
+    # Team pickers, AFC and NFC grouped by division in the fixed order the
+    # page has always used. The template builds the selects from this.
+    pickers = []
+    for conf in ("AFC", "NFC"):
+        groups = {}
+        for div in ("East", "North", "South", "West"):
+            groups[f"{conf} {div}"] = sorted(
+                a for a, (_, d) in TEAMS.items() if d == f"{conf} {div}")
+        pickers.append({"id": conf.lower(), "label": conf, "groups": groups})
     data = {
+        "league": "nfl",
         "season": int(LAST_SEASON),
         "generated": date.today().isoformat(),
         "teams": {abbr: {"name": name, "division": div}
                   for abbr, (name, div) in TEAMS.items()},
+        "pickers": pickers,
+        "starAt": 0.65,
         "games": games,
         "props": props_payload(),
         "qb": qb_payload(),

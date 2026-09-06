@@ -38,3 +38,13 @@ clv_picks.csv
 backups/
 kalshi_consensus.csv
 kalshi_history.csv
+
+# College football pipeline: downloaded releases + generated outputs
+cfb_cache/
+cfb_features.parquet
+cfb_model.json
+cfb_model_meta.json
+cfb_props_projections.csv
+cfb_sources.csv
+web/college/
+refresh_cfb.log

@@ -97,6 +97,17 @@
   }
   h1 .season { color: var(--field); }
   .tagline { color: var(--muted); font-size: 0.9rem; }
+  /* League tabs: one page per league, same template, same design. */
+  .leagues { display: flex; gap: 6px; margin-top: 14px; }
+  .leagues a {
+    text-decoration: none; color: var(--muted); border: 1px solid var(--line);
+    background: var(--surface); border-radius: 6px; padding: 5px 12px;
+    font-family: "Avenir Next Condensed", "Arial Narrow", system-ui, sans-serif;
+    font-size: 0.95rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em;
+  }
+  .leagues a:hover { border-color: var(--field); color: var(--ink); }
+  .leagues a.on { background: var(--field); border-color: var(--field); color: #fff; }
+  .leagues a:focus-visible { outline: 2px solid var(--field); outline-offset: 1px; }
 
   .picker { margin: 22px 0 6px; }
   .picker-label {
@@ -106,7 +117,7 @@
   .conf-row { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; align-items: center; }
   .conf-tag {
     font-size: 0.72rem; font-weight: 700; letter-spacing: 0.06em;
-    color: var(--muted); width: 34px; flex: none;
+    color: var(--muted); min-width: 34px; flex: none; white-space: nowrap;
   }
   .chips { display: flex; flex-wrap: wrap; gap: 6px; }
   .chip {
@@ -130,6 +141,8 @@
   /* Conference dropdowns: 32 chips did not fit a phone without wrapping into
      five rows, so each conference is one <select> grouped by division. */
   .sel-row { display: flex; flex-wrap: wrap; gap: 8px 12px; margin-bottom: 10px; }
+  /* display:flex above would otherwise beat the browser's [hidden] rule. */
+  .sel-row[hidden] { display: none; }
   .sel-group { display: flex; align-items: center; gap: 7px; flex: 1 1 210px; }
   .sel-wrap { position: relative; flex: 1 1 auto; min-width: 0; }
   .sel-wrap::after {
@@ -595,6 +608,10 @@
       <button class="authbtn" id="friendsBtn">Friends&rsquo; picks</button>
       <button class="authbtn" id="authBtn" hidden></button>
     </div>
+    <nav class="leagues" aria-label="League">
+      <a href="/" data-league="nfl">NFL</a>
+      <a href="/college/" data-league="cfb">College Football</a>
+    </nav>
   </header>
 
   <section class="live" id="liveNow" hidden aria-live="polite">
@@ -613,17 +630,12 @@
       </div>
     </div>
     <div class="picker-label">Pick your team</div>
-    <div class="sel-row">
+    <div class="sel-row" id="teamPickers"></div>
+    <div class="sel-row" id="gameFilterRow" hidden>
       <div class="sel-group">
-        <label class="conf-tag" for="afcSel">AFC</label>
-        <div class="sel-wrap" id="afcWrap">
-          <select class="team-select" id="afcSel" aria-label="Filter by AFC team"></select>
-        </div>
-      </div>
-      <div class="sel-group">
-        <label class="conf-tag" for="nfcSel">NFC</label>
-        <div class="sel-wrap" id="nfcWrap">
-          <select class="team-select" id="nfcSel" aria-label="Filter by NFC team"></select>
+        <label class="conf-tag" for="filterSel">Games</label>
+        <div class="sel-wrap" id="filterWrap">
+          <select class="team-select" id="filterSel" aria-label="Filter the week's games"></select>
         </div>
       </div>
     </div>
@@ -632,6 +644,36 @@
   <main id="main"></main>
 
   <footer>
+    <div id="footCfb" hidden>
+    <p><span class="badge starred">&#9733; high confidence</span> marks picks at
+    &ge;<span data-meta="starAtPct"></span>% win probability &mdash; in a walk-forward
+    backtest over <span data-meta="games"></span> FBS games (<span data-meta="seasons"></span>)
+    those hit at <span data-meta="starAcc"></span>%, while all picks together hit
+    <span data-meta="acc"></span>%. College spreads are far wider than the NFL&rsquo;s, so
+    a lot of games are near-certain; the star tier is set higher here for that reason.</p>
+    <p>Probabilities come from an Elo rating (margin-aware, neutral-site aware, FCS
+    opponents rated on their own scale) blended with an XGBoost model using
+    eight-game form on both sides of the ball, EPA per play, rest, conference play,
+    preseason roster talent from the 247Sports composite, and the market&rsquo;s own
+    spread where one is posted. Data is the free sportsdataverse releases of ESPN box
+    scores, refreshed daily. College has no official injury report, so the model does
+    not weight absences the way the NFL model does; ESPN&rsquo;s injury list is shown
+    where it has anything.</p>
+    <p>Each game also shows an <b>against-the-spread lean</b>: ESPN&rsquo;s posted
+    spread vs the model&rsquo;s expected margin, with a cover probability.
+    <b>Read it as a comparison, not a bet.</b> On games with a spread in the backtest
+    the line called the winner 79% of the time and the model 74% &mdash; the market
+    knows more than we do. The lean has not been tested against closing lines for
+    college and carries no track record yet.</p>
+    <p>Player props are quantile projections (P10&ndash;P90) from each player&rsquo;s
+    rolling usage and production in ESPN box scores, his share of the team&rsquo;s
+    volume, what the opponent allows to his position, and the game context. College
+    has no target data, so receiving usage is receptions. No sportsbook lines are
+    attached to college props yet.</p>
+    <p><a class="how" href="/how-it-works.html">How the NFL model works &mdash; the
+    college one shares its design</a></p>
+    </div>
+    <div id="footNfl">
     <p><span class="badge starred">&#9733; high confidence</span> marks picks at
     &ge;65% win probability &mdash; in an 11-season backtest those hit at 73%,
     while all picks together hit 65% (the Vegas closing line manages 66%).
@@ -671,8 +713,9 @@
     moneyline backtest against 11 seasons of closing lines lost money at every
     threshold, so props get no real stake unless the paper record clears the
     vig with a real sample.</p>
-    <p><a class="how" href="how-it-works.html">How it works &mdash; the model,
+    <p><a class="how" href="/how-it-works.html">How it works &mdash; the model,
     the backtests, and what the numbers mean</a></p>
+    </div>
   </footer>
 </div>
 
@@ -680,12 +723,32 @@
   const DATA = __DATA_JSON__;
   const teams = DATA.teams;
   const games = DATA.games;
+  // One template, two leagues. Everything NFL-only (pick'em, tracking, QB
+  // grades, live win probability) checks LEAGUE; everything else reads the
+  // payload and does not care which sport it is.
+  const LEAGUE = DATA.league || "nfl";
+  const STAR_AT = DATA.starAt || 0.65;          // confidence the page stars
+  const STAR_ACC = (DATA.meta && DATA.meta.starAcc) || 74;
+  let gameFilter = "";                          // key into DATA.filters
+  document.querySelectorAll(".leagues a").forEach(a =>
+    a.classList.toggle("on", a.dataset.league === LEAGUE));
+  const wkLabel = w => {
+    const g = games.find(x => x.week === w);
+    return g && g.post ? "Postseason " + (w - 15) : "Week " + w;
+  };
   let selected = null;   // team abbr or null = all games
   let curWeek = null;
   let view = "games";    // "games" | "qb" | "props"
 
-  document.getElementById("seasonLabel").textContent = DATA.season;
+  document.getElementById("seasonLabel").textContent =
+    (LEAGUE === "cfb" ? "College " : "") + DATA.season;
   document.getElementById("genLabel").textContent = "updated " + DATA.generated;
+  document.getElementById("footNfl").hidden = LEAGUE !== "nfl";
+  document.getElementById("footCfb").hidden = LEAGUE === "nfl";
+  if (DATA.meta) {
+    const m = Object.assign({ starAtPct: Math.round(STAR_AT * 100) }, DATA.meta);
+    document.querySelectorAll("[data-meta]").forEach(el => { el.textContent = m[el.dataset.meta]; });
+  }
 
   const nextWeek = (() => {
     const up = games.filter(g => g.homeScore === null);
@@ -826,6 +889,25 @@
         ") — individual ratings from each QB’s last 10 starts, edge " +
         (better ? g.home : g.away) + ".");
     }
+    if (f.talentH != null && f.talentA != null) {
+      const edge = f.talentH >= f.talentA ? g.home : g.away;
+      out.push("<b>Roster talent (247Sports composite):</b> " + g.home + " " + f.talentH +
+        " vs " + g.away + " " + f.talentA + " — recruiting rankings of everyone on the " +
+        "roster, edge " + edge + ". Fourth-strongest signal in the college model.");
+    }
+    if (f.neutral) {
+      out.push("<b>Neutral site:</b> no home-field edge in the rating for either side.");
+    }
+    if (f.confGame) {
+      out.push("<b>Conference game:</b> familiar opponents; the model carries the flag.");
+    }
+    if (LEAGUE === "cfb") {
+      const inj = [[g.home, f.injH || []], [g.away, f.injA || []]].filter(([, l]) => l.length);
+      out.push(inj.length
+        ? "<b>Injuries (ESPN):</b> " + inj.map(([side, l]) => side + ": " + l.join(", ")).join("; ") +
+          ". College has no official injury report; this is what ESPN lists and it is display only."
+        : "<b>Injuries:</b> college has no official injury report. ESPN lists nothing for either side.");
+    }
     if (f.restH != null && f.restA != null && f.restH !== f.restA) {
       const rested = f.restH > f.restA ? g.home : g.away;
       out.push("<b>Rest:</b> " + g.home + " on " + f.restH + " days, " + g.away +
@@ -836,7 +918,9 @@
     const injTotal = (f.outH || 0) + (f.outA || 0) + (f.questH || 0) + (f.questA || 0);
     const qbNote = (f.qbH ? " " + g.home + " has a QB change vs their last game." : "") +
                    (f.qbA ? " " + g.away + " has a QB change vs their last game." : "");
-    if (injTotal > 0 || played(g)) {
+    if (LEAGUE !== "nfl") {
+      // handled above: college has no report to summarise
+    } else if (injTotal > 0 || played(g)) {
       let inj = "<b>Injury report:</b> " + g.home + " " + (f.outH || 0) + " out / " +
         (f.questH || 0) + " questionable, " + g.away + " " + (f.outA || 0) + " out / " +
         (f.questA || 0) + " questionable — each absence weighted by the player’s snap share.";
@@ -877,7 +961,9 @@
       out.push("<b>Injury report:</b> not out yet — reports land in game week" +
         " and this number sharpens when they do." + qbNote);
     }
-    if (f.dome) {
+    if (LEAGUE !== "nfl") {
+      // no forecast feed for college yet
+    } else if (f.dome) {
       out.push("<b>Weather:</b> indoors — taken off the table.");
     } else if (f.temp != null || f.wind != null) {
       const w = [];
@@ -1017,7 +1103,7 @@
     const isDog = p < 0.5;
     const opp = g.home === team ? g.away : g.home;
     const at = g.home === team ? "vs" : "@";
-    const starred = conf(g) >= 0.65;
+    const starred = conf(g) >= STAR_AT;
     let who, pctLabel;
     const a = ats(g);
     const pctTxt = "(" + Math.round(a && a.cover * 100) + "%)";
@@ -1048,7 +1134,7 @@
     }
     const open = expanded.has(gid(g));
     return '<div class="game" data-gid="' + gid(g) + '" role="button" tabindex="0" aria-expanded="' +
-      open + '"><div class="when">Wk ' + g.week + "<br>" + fmtDate(g.date) +
+      open + '"><div class="when">' + (g.post ? "Post" : "Wk " + g.week) + "<br>" + fmtDate(g.date) +
       '</div><div class="who">' + who + result + "</div>" +
       meter(perspective ? p : conf(g), perspective ? isDog : false) +
       '<div class="pct">' + (starred ? '<span class="star">★</span> ' : "") + pctLabel + "</div>" +
@@ -1063,12 +1149,12 @@
       const p = probFor(team, next);
       const opp = next.home === team ? next.away : next.home;
       const at = next.home === team ? "vs" : "at";
-      html += '<div class="hero"><div class="eyebrow display">Next up &mdash; Week ' +
-        next.week + ", " + fmtDate(next.date) + "</div>" +
+      html += '<div class="hero"><div class="eyebrow display">Next up &mdash; ' +
+        wkLabel(next.week) + ", " + fmtDate(next.date) + "</div>" +
         '<div class="matchup display">' + teams[team].name + " " + at + " " + teams[opp].name + "</div>" +
         '<div class="sub">' + teams[team].division + " " + (next.home === team ? "home game" : "road game") + "</div>" +
         '<div class="bignum">' + Math.round(p * 100) + "% <small>chance the " +
-        teams[team].name.split(" ").pop() + " win" + (conf(next) >= 0.65 ? " — ★ high confidence" : "") +
+        teams[team].name.split(" ").pop() + " win" + (conf(next) >= STAR_AT ? " — ★ high confidence" : "") +
         "</small></div></div>";
     }
     const track = starBtn("team", team, teams[team].name);
@@ -1091,20 +1177,30 @@
     return html;
   }
 
+  function filterSet() {
+    const f = (DATA.filters || []).find(x => x.key === gameFilter);
+    return f ? new Set(f.teams) : null;
+  }
+
   function renderWeek(week) {
-    const wk = games.filter(g => g.week === week);
+    const fs = filterSet();
+    let wk = games.filter(g => g.week === week);
+    if (fs) wk = wk.filter(g => fs.has(g.home) || fs.has(g.away));
     const weeks = [...new Set(games.map(g => g.week))].sort((a, b) => a - b);
     const i = weeks.indexOf(week);
     let html = '<div class="weeknav">' +
-      '<button id="prevWk"' + (i === 0 ? " disabled" : "") + '>&larr; Wk ' + (i > 0 ? weeks[i - 1] : "") + "</button>" +
-      '<span class="wk display">Week ' + week + "</span>" +
-      '<button id="nextWk"' + (i === weeks.length - 1 ? " disabled" : "") + '>Wk ' + (i < weeks.length - 1 ? weeks[i + 1] : "") + " &rarr;</button></div>";
+      '<button id="prevWk"' + (i === 0 ? " disabled" : "") + '>&larr; ' + (i > 0 ? wkLabel(weeks[i - 1]).replace("Week", "Wk") : "") + "</button>" +
+      '<span class="wk display">' + wkLabel(week) + "</span>" +
+      '<button id="nextWk"' + (i === weeks.length - 1 ? " disabled" : "") + '>' + (i < weeks.length - 1 ? wkLabel(weeks[i + 1]).replace("Week", "Wk") : "") + " &rarr;</button></div>";
+    if (!wk.length) {
+      html += '<p class="note">No games match this filter in ' + wkLabel(week).toLowerCase() + ".</p>";
+    }
     const byConfDesc = (a, b) => conf(b) - conf(a);
-    const starred = wk.filter(g => conf(g) >= 0.65).sort(byConfDesc);
-    const rest = wk.filter(g => conf(g) < 0.65).sort(byConfDesc);
+    const starred = wk.filter(g => conf(g) >= STAR_AT).sort(byConfDesc);
+    const rest = wk.filter(g => conf(g) < STAR_AT).sort(byConfDesc);
     if (starred.length) {
       html += section("wk-star", "&#9733; High confidence &mdash; " + starred.length +
-        (starred.length === 1 ? " pick" : " picks") + ", 74% correct historically",
+        (starred.length === 1 ? " pick" : " picks") + ", " + STAR_ACC + "% correct historically",
         '<div class="games">' + starred.map(g => gameRow(g, null)).join("") + "</div>");
     }
     if (rest.length) {
@@ -1117,7 +1213,9 @@
       '<span class="display">green code = predicted winner</span>' +
       (rec ? "<span>ATS leans this season: <b>" + rec.w + "&ndash;" + rec.l +
         "</b> (" + Math.round(100 * rec.w / (rec.w + rec.l)) + "%)</span>" : "") +
-      '<span><span class="ats-hot">green cover %</span> = confident ATS tier (&ge;60%, covered 58% historically)</span>' +
+      (LEAGUE === "nfl"
+        ? '<span><span class="ats-hot">green cover %</span> = confident ATS tier (&ge;60%, covered 58% historically)</span>'
+        : '<span><span class="ats-hot">green cover %</span> = model disagrees with the line by a wide margin (not yet backtested)</span>') +
       '<span>click a game for the reasoning</span></div>';
     return html;
   }
@@ -1788,7 +1886,7 @@
       '<span class="lbl">' + hint + " &middot; locks at kickoff</span></div>";
   }
 
-  const gamePickStrip = g => pickStrip("game", g.week, gref(g),
+  const gamePickStrip = g => LEAGUE !== "nfl" ? "" : pickStrip("game", g.week, gref(g),
     [{ value: g.away, label: g.away }, { value: g.home, label: g.home }],
     "who wins?", null, lockedGame(g),
     teams[g.away].name + " at " + teams[g.home].name) + othersLine(g);
@@ -1803,7 +1901,7 @@
   const OTHERS_PER_PAGE = 3;
 
   function loadOthers(week) {
-    if (!SB_PROVIDERS.length || othersByWeek.has(week)) return;
+    if (!SB_PROVIDERS.length || LEAGUE !== "nfl" || othersByWeek.has(week)) return;
     othersByWeek.set(week, "loading");
     publicRpc("week_picks", { season_: DATA.season, week_: week }).then(rows => {
       const byRef = new Map();
@@ -1841,6 +1939,7 @@
   }
 
   function propPickStrip(pl, week, statKey) {
+    if (LEAGUE !== "nfl") return "";
     const g = propGame(pl, week);
     return pickStrip("prop", week, pl.pid + "|" + statKey,
       [{ value: "over", label: "Over" }, { value: "under", label: "Under" }],
@@ -1933,7 +2032,7 @@
   // A star renders only when sign-in is switched on; with no providers wired
   // there is nowhere to save to, so the button would be a dead end.
   function starBtn(kind, ref, label) {
-    if (!SB_PROVIDERS.length) return "";
+    if (!SB_PROVIDERS.length || LEAGUE !== "nfl") return "";
     const on = isFav(kind, ref);
     return '<button class="trackbtn" data-track="' + kind + '" data-ref="' + esc(ref) +
       '" data-label="' + esc(label) + '" aria-pressed="' + on + '" title="' +
@@ -2178,7 +2277,7 @@
     const i = weeks.indexOf(week);
     return '<div class="weeknav">' +
       '<button id="prevWk"' + (i <= 0 ? " disabled" : "") + '>&larr; Wk ' + (i > 0 ? weeks[i - 1] : "") + "</button>" +
-      '<span class="wk display">Week ' + week + "</span>" +
+      '<span class="wk display">' + wkLabel(week) + "</span>" +
       '<button id="nextWk"' + (i === weeks.length - 1 ? " disabled" : "") + '>Wk ' + (i < weeks.length - 1 ? weeks[i + 1] : "") + " &rarr;</button></div>";
   }
 
@@ -2322,14 +2421,17 @@
   // What the Show dropdown offers. Six chips wrapped onto three rows on a
   // phone and pushed the week's games below the fold; this is one control
   // that stays one line at any width.
+  // Accounts, pick'em and tracking are NFL-only for now: the picks tables are
+  // keyed by NFL team codes and graded against NFL results.
+  const ACCOUNTS = LEAGUE === "nfl" && SB_PROVIDERS.length > 0;
   const VIEWS = [
     { v: "games", label: "All games, week by week", on: () => true },
     { v: "qb", label: "QB grades by quarter", on: () => !!DATA.qb },
     { v: "props", label: "Player props", on: () => !!DATA.props },
-    { v: "saved", label: "My tracking", on: () => SB_PROVIDERS.length > 0 },
-    { v: "picks", label: "My picks", on: () => SB_PROVIDERS.length > 0 },
-    { v: "board", label: "Leaderboard", on: () => SB_PROVIDERS.length > 0 },
-    { v: "friends", label: "Friends\u2019 picks", on: () => SB_PROVIDERS.length > 0 },
+    { v: "saved", label: "My tracking", on: () => ACCOUNTS },
+    { v: "picks", label: "My picks", on: () => ACCOUNTS },
+    { v: "board", label: "Leaderboard", on: () => ACCOUNTS },
+    { v: "friends", label: "Friends\u2019 picks", on: () => ACCOUNTS },
     // Only ever the current view, never something to navigate to.
     { v: "shared", label: "Somebody's picks", on: () => view === "shared" },
   ];
@@ -2411,14 +2513,18 @@
       const co = document.getElementById("collapseAll");
       if (co) co.onclick = () => { keys.forEach(k => collapsedSecs.add(k)); render(); };
     }
-    for (const confName of ["AFC", "NFC"]) {
-      const key = confName.toLowerCase();
-      const mine = view === "games" && selected &&
-        teams[selected] && teams[selected].division.startsWith(confName);
-      const sel = document.getElementById(key + "Sel");
+    for (const pk of PICKERS) {
+      const mine = view === "games" && selected && pickerOf[selected] === pk.id;
+      const sel = document.getElementById(pk.id + "Sel");
       sel.value = mine ? selected : "";
       sel.classList.toggle("active", !!mine);
-      document.getElementById(key + "Wrap").classList.toggle("active", !!mine);
+      document.getElementById(pk.id + "Wrap").classList.toggle("active", !!mine);
+    }
+    const fsel = document.getElementById("filterSel");
+    if (fsel) {
+      fsel.value = gameFilter;
+      fsel.classList.toggle("active", !!gameFilter);
+      document.getElementById("filterWrap").classList.toggle("active", !!gameFilter);
     }
     syncViewSelect();
     if (view === "picks" && profile) wireProfileControls();
@@ -2473,41 +2579,56 @@
     };
   }
 
-  const byConf = { AFC: [], NFC: [] };
-  Object.entries(teams).forEach(([abbr, t]) => byConf[t.division.split(" ")[0]].push(abbr));
-  const DIV_ORDER = ["East", "North", "South", "West"];
-  for (const confName of ["AFC", "NFC"]) {
-    const sel = document.getElementById(confName.toLowerCase() + "Sel");
-    const placeholder = document.createElement("option");
-    placeholder.value = "";
-    placeholder.textContent = "All " + confName + " teams";
-    sel.appendChild(placeholder);
-    const divs = {};
-    byConf[confName].forEach(abbr => {
-      (divs[teams[abbr].division] = divs[teams[abbr].division] || []).push(abbr);
+  // Team pickers come from the payload: the NFL sends AFC and NFC grouped by
+  // division, college sends the Power Four and everyone else grouped by
+  // conference. Picking in one clears the others, so one team is ever on.
+  const PICKERS = DATA.pickers || [];
+  const pickerOf = {};
+  const pickerHost = document.getElementById("teamPickers");
+  PICKERS.forEach(pk => {
+    const grp = document.createElement("div"); grp.className = "sel-group";
+    const lab = document.createElement("label"); lab.className = "conf-tag";
+    lab.htmlFor = pk.id + "Sel"; lab.textContent = pk.label;
+    const wrap = document.createElement("div"); wrap.className = "sel-wrap"; wrap.id = pk.id + "Wrap";
+    const sel = document.createElement("select"); sel.className = "team-select"; sel.id = pk.id + "Sel";
+    sel.setAttribute("aria-label", "Filter by " + pk.label + " team");
+    const ph = document.createElement("option"); ph.value = ""; ph.textContent = "All " + pk.label + " teams";
+    sel.appendChild(ph);
+    Object.entries(pk.groups).forEach(([div, abbrs]) => {
+      const og = document.createElement("optgroup"); og.label = div;
+      abbrs.filter(a => teams[a]).sort((a, b) => teams[a].name.localeCompare(teams[b].name))
+        .forEach(abbr => {
+          pickerOf[abbr] = pk.id;
+          const o = document.createElement("option"); o.value = abbr;
+          o.textContent = teams[abbr].name + " (" + abbr + ")";
+          og.appendChild(o);
+        });
+      sel.appendChild(og);
     });
-    Object.keys(divs)
-      .sort((a, b) => DIV_ORDER.indexOf(a.split(" ")[1]) - DIV_ORDER.indexOf(b.split(" ")[1]))
-      .forEach(div => {
-        const og = document.createElement("optgroup");
-        og.label = div;
-        divs[div]
-          .sort((a, b) => teams[a].name.localeCompare(teams[b].name))
-          .forEach(abbr => {
-            const o = document.createElement("option");
-            o.value = abbr;
-            o.textContent = teams[abbr].name + " (" + abbr + ")";
-            og.appendChild(o);
-          });
-        sel.appendChild(og);
-      });
-    // Picking in one conference clears the other, so only one team is ever on.
     sel.onchange = () => { view = "games"; selected = sel.value || null; render(); };
+    wrap.appendChild(sel); grp.appendChild(lab); grp.appendChild(wrap); pickerHost.appendChild(grp);
+  });
+  // The week filter (college: conference or Power Four) only exists where the
+  // payload offers one; the NFL's sixteen games need no narrowing.
+  const filterRow = document.getElementById("gameFilterRow");
+  if ((DATA.filters || []).length) {
+    const sel = document.getElementById("filterSel");
+    const all = document.createElement("option"); all.value = ""; all.textContent = "All " + (LEAGUE === "cfb" ? "FBS " : "") + "games";
+    sel.appendChild(all);
+    DATA.filters.forEach(f => {
+      const o = document.createElement("option"); o.value = f.key; o.textContent = f.label; sel.appendChild(o);
+    });
+    sel.onchange = () => { gameFilter = sel.value; view = "games"; selected = null; render(); };
+    filterRow.hidden = false;
   }
   const viewSel = document.getElementById("viewSel");
   viewSel.onchange = () => showView(viewSel.value);
   document.getElementById("myPicksBtn").onclick = () => showView("picks");
   document.getElementById("friendsBtn").onclick = () => showView("friends");
+  if (LEAGUE !== "nfl") {
+    document.getElementById("myPicksBtn").hidden = true;
+    document.getElementById("friendsBtn").hidden = true;
+  }
 
   // Rows expand inline (key players); the analysis bullets open in a modal
   // via the ⓘ button. One delegated handler for both.
@@ -2633,8 +2754,10 @@
       // error worth showing anyone.
       .catch(() => { liveEl.hidden = true; });
   }
-  pollLive();
-  setInterval(pollLive, LIVE_POLL_MS);
+  if (LEAGUE === "nfl") {
+    pollLive();
+    setInterval(pollLive, LIVE_POLL_MS);
+  }
 
   const mainEl = document.getElementById("main");
   mainEl.addEventListener("click", toggleGame);
