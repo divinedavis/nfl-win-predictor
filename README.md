@@ -503,3 +503,25 @@ record clears the 53.3% breakeven (-114 juice) over 200+ settled picks.
 Historical prop lines are paywalled — paper trading the live season is the only
 honest test. Lines come from The Odds API free tier (hard-capped: one snapshot
 per day, one book, four markets).
+
+## College football (FBS)
+
+`sputterbets.com/college/` is the same page for FBS, built from the same
+template by the `cfb/` package. Every source is free and keyless:
+sportsdataverse's nightly releases of ESPN data (schedules, per-team-game
+box + EPA, spreads, player box scores, rosters, 247 talent) plus ESPN's
+public scoreboard and FPI predictor and Kalshi's college game markets.
+
+```bash
+.venv/bin/python -m cfb.features        # cfb_features.parquet (Elo, form, talent, market)
+.venv/bin/python -m cfb.train           # walk-forward 2015-2025, writes cfb_model.json + meta
+.venv/bin/python -m cfb.props           # every team's next game inside 8 days
+.venv/bin/python -m cfb.fetch_sources   # ESPN FPI + Kalshi for the next two weeks
+.venv/bin/python -m cfb.export          # web/college/index.html
+./refresh_cfb.sh                        # all of the above + deploy; cron 09:00 UTC
+```
+
+Backtest: 74.4% / Brier .167 over 9,574 games; the posted line calls 79%
+where one exists. Picks at 85%+ confidence (29% of games) hit 94%, which is
+the star tier on the college page. Accounts, pick'em, tracking, QB grades and
+live scores are NFL-only for now.
