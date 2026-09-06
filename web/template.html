@@ -918,8 +918,15 @@
       veg = " &middot; Vegas " + p.vl + " &rarr; model <b>" + p.lean +
         "</b> (" + Math.round(p.lp * 100) + "%)";
     }
+    // What he actually did last time out, so the projection has a reference
+    // point. In week 1 this is last season's finale, labelled with the year.
+    let last = "";
+    if (p.lg != null) {
+      last = " &middot; last game <b>" + p.lg + "</b> " + p.u +
+        " (" + p.lgWhen + (p.lgOpp ? " vs " + p.lgOpp : "") + ")";
+    }
     return "<li><b>" + p.n + "</b> " + p.pos + st +
-      " — proj " + p.v + " " + p.u + veg + vs + "</li>";
+      " — proj " + p.v + " " + p.u + veg + last + vs + "</li>";
   }
 
   // ---- what everyone thinks ----
@@ -1124,6 +1131,10 @@
         p.opp + ": avg " + p.vsAvg + " in " + p.vsN +
         (p.vsN > 1 ? " games" : " game") +
         (p.carAvg ? " (career " + p.carAvg + ")" : "") + tilt + "</div>";
+    }
+    if (p.lg != null) {
+      hist = '<div class="sub">last game: <b>' + p.lg + "</b> (" + p.lgWhen +
+        (p.lgOpp ? " vs " + p.lgOpp : "") + ")</div>" + hist;
     }
     // Kalshi prices props as threshold contracts, so both numbers answer the
     // same question at the same line: P(stat reaches it). Shown only when a

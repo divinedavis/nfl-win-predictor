@@ -69,6 +69,22 @@ STAT_LABELS = {
 PROJECTION_LOG = Path("props_projection_log.csv")
 
 
+def _last_game(r) -> dict:
+    """The player's most recent box score: yards, when, against whom. Week 1
+    shows last season's finale, so the label carries the year. Older
+    props_projections.csv files predate these columns -> nothing emitted."""
+    y = getattr(r, "last_yds", None)
+    if y is None or pd.isna(y):
+        return {}
+    ls, lw = int(r.last_season), int(r.last_week)
+    # Weeks past 18 are the postseason; call the round by name.
+    wk = {19: "wild card", 20: "divisional", 21: "conf champ",
+          22: "Super Bowl"}.get(lw, f"wk {lw}")
+    when = wk if ls == int(r.season) else f"'{ls % 100} {wk}"
+    opp = r.last_opp if isinstance(r.last_opp, str) else ""
+    return {"lg": int(y), "lgWhen": when, "lgOpp": opp}
+
+
 def _log_projections(shown: pd.DataFrame) -> None:
     """Remember every player-week the page has actually offered.
 
@@ -171,6 +187,7 @@ def props_payload():
             "vsAvg": _f(getattr(r, "vs_opp_avg", None), 1),
             "vsLog": getattr(r, "vs_opp_log", "") or "",
             "carAvg": _f(getattr(r, "career_avg", None), 1),
+            **_last_game(r),
             # {line, k: Kalshi P(>= line), ours: our P(>= line)} or absent
             "kal": kalshi_for(r.player, stat, [r.p10, r.p25, r.p50, r.p75, r.p90]),
         } for r in d.itertuples(index=False)]
@@ -304,6 +321,7 @@ def main() -> None:
                                           else "") or "",
                 "vsN": int(r.vs_opp_n or 0), "vsA": _f(r.vs_opp_avg, 1),
                 "car": _f(r.career_avg, 1),
+                **_last_game(r),
             }
             vl = prop_lines.get((norm_name(r.player), r.stat))
             if vl is not None:

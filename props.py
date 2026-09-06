@@ -509,6 +509,10 @@ def project() -> None:
             vs = h[h["opponent_team"] == game.opp]
             vs_log = ";".join(f"'{int(v.season) % 100} wk{int(v.week)}: {v.y:g}"
                               for v in vs.tail(5).itertuples(index=False))
+            # The player's most recent game, whatever it was: last week in
+            # season, or last season's finale in week 1. Readers asked to see
+            # it next to the projection rather than only the career/vs-D avgs.
+            lg = h.iloc[-1]
             # Active status: game-week injury report + same-season IR list.
             pnorm = norm_name(r.player_display_name)
             status = ""
@@ -533,6 +537,9 @@ def project() -> None:
                 "vs_opp_avg": round(float(vs["y"].mean()), 1) if len(vs) else None,
                 "vs_opp_log": vs_log,
                 "career_avg": round(float(h["y"].mean()), 1),
+                "last_yds": round(float(lg.y), 0),
+                "last_season": int(lg.season), "last_week": int(lg.week),
+                "last_opp": lg.opponent_team,
                 "status": status,
             })
 
