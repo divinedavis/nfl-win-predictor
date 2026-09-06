@@ -1067,8 +1067,15 @@
       "other by " + pts(Math.round(spread * 100)) + ", but we sit in the middle of them.";
     else note = "We are " + pts(Math.round(Math.abs(gap) * 100)) + " " +
       (gap > 0 ? "higher" : "lower") + " on " + teams[pick(g)].name +
-      " than the outside average. Historically we only beat the market on this " +
-      "kind of disagreement in weeks 1-4.";
+      " than the outside average. " +
+      // The weeks 1-4 edge is an NFL finding (clv.py). The college backtest
+      // says the opposite: on early-season disagreements the books win.
+      (LEAGUE === "cfb"
+        ? "In college that is a warning, not an edge: before week 5 our " +
+          "features are last season's results, and when we disagree with the " +
+          "books by this much they have been right more often than us."
+        : "Historically we only beat the market on this kind of disagreement " +
+          "in weeks 1-4.");
     return html + '</div><div class="note">' + note + "</div>";
   }
 
