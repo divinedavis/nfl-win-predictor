@@ -1780,6 +1780,8 @@
   let profile = null;              // {display_name, share_id, is_public}
   let board = null;                // leaderboard rows, loaded on demand
   let sharedCard = null;           // someone else's card, from ?u=
+  let sharedWeek = null;           // that card narrowed to one week, from ?w=
+  let shareWeekSel = "auto";       // which week my own share link covers
   let players = null;              // [{display_name, share_id}] for Friends' picks
   let friend = null;               // share_id of the player being looked at
   let friendCard = null;           // their card, null while loading, "missing" if gone
@@ -2024,8 +2026,9 @@
 
   // A shared card is a public read: it works signed out, and it does not
   // disturb whatever the visitor was doing before they followed the link.
-  async function openShared(shareId) {
+  async function openShared(shareId, week) {
     view = "shared";
+    sharedWeek = week;
     render();
     try {
       const rows = await publicRpc("shared_card", { share: shareId });
@@ -2167,16 +2170,39 @@
       "</div>";
 
     if (profile) {
+      // The link used to be the whole season, which is more than anyone means
+      // by "here are my picks". It now defaults to the week being looked at,
+      // and "All weeks" is still there for the season card.
+      const weeks = [...new Set(rows.map(r => r.week))].sort((a, b) => b - a);
+      if (shareWeekSel === "auto") {
+        // One week by default, and the one being played if there are picks in
+        // it — sharing the whole season is a thing you now have to choose.
+        shareWeekSel = weeks.indexOf(curWeek) >= 0 ? curWeek
+          : (weeks.length ? weeks[0] : null);
+      } else if (shareWeekSel !== null && weeks.indexOf(shareWeekSel) < 0) {
+        shareWeekSel = null;
+      }
       html += '<div class="sharebar">' +
         '<input class="search name" id="nameInput" maxlength="40" ' +
         'aria-label="Name shown on the leaderboard" value="' + esc(profile.display_name) + '">' +
         '<button class="chip all" id="saveName">Save name</button>' +
+        (weeks.length ? '<select class="search" id="shareWeek" ' +
+          'aria-label="Which week the share link covers">' +
+          '<option value=""' + (shareWeekSel === null ? " selected" : "") +
+          ">All weeks</option>" +
+          weeks.map(w => '<option value="' + w + '"' +
+            (w === shareWeekSel ? " selected" : "") + ">" + wkLabel(w) +
+            " only</option>").join("") + "</select>" : "") +
         '<button class="chip all" id="copyShare">Copy share link</button>' +
         '<button class="chip all" id="togglePublic" aria-pressed="' + !!profile.is_public + '">' +
         (profile.is_public ? "On the leaderboard" : "Hidden from the leaderboard") +
         "</button></div>" +
-        '<p class="note">The share link shows this name, your record and your ' +
-        "picks to anyone who opens it. Turning yourself off the leaderboard " +
+        '<p class="note">The share link shows this name and ' +
+        (shareWeekSel === null
+          ? "every pick you have made, with your season record,"
+          : wkLabel(shareWeekSel).toLowerCase() +
+            " only &mdash; no other week's picks, and the record counts just that week &mdash;") +
+        " to anyone who opens it. Turning yourself off the leaderboard " +
         "switches the link off too.</p>";
     }
 
@@ -2223,18 +2249,35 @@
     const c = sharedCard;
     // The function returns hit = null for a push as well as for a pending
     // pick; cardRows tells the two apart from the line and the actual.
-    const rows = cardRows(c);
-    const pushes = rows.filter(r => r.verdict === "push").length;
+    const all = cardRows(c);
+    // ?w=N narrows the card to one week. The tiles are then counted from the
+    // rows on show, not from the season: a link that hands over week 2 must
+    // not total up the weeks it withheld.
+    const rows = sharedWeek === null ? all : all.filter(r => r.week === sharedWeek);
+    const t = tally(rows);
+    const pushes = sharedWeek === null
+      ? all.filter(r => r.verdict === "push").length : t.push;
+    const pct = sharedWeek === null ? c.pct : t.pct;
+    const wins = sharedWeek === null ? c.wins : t.wins;
+    const losses = sharedWeek === null ? c.losses : t.losses;
+    const pending = (sharedWeek === null ? c.pending : t.pending + t.push) - pushes;
+    const scope = sharedWeek === null ? "picks on Sputter Bets"
+      : wkLabel(sharedWeek).toLowerCase() + " picks on Sputter Bets";
     return '<div class="tiles">' +
-      tile(esc(c.display_name), "picks on Sputter Bets") +
-      tile(c.pct === null ? "&mdash;" : Number(c.pct).toFixed(1) + "%",
+      tile(esc(c.display_name), scope) +
+      tile(pct === null ? "&mdash;" : Number(pct).toFixed(1) + "%",
            "of settled picks correct") +
-      tile(c.wins + "&ndash;" + c.losses, "won&ndash;lost") +
-      tile(c.pending - pushes, "waiting on results" +
+      tile(wins + "&ndash;" + losses, "won&ndash;lost") +
+      tile(pending, "waiting on results" +
            (pushes ? " &middot; " + pushes + " push" : "")) + "</div>" +
       (rows.length ? '<div class="games">' +
-        rows.map(r => pickLine(r, "them")).join("") + "</div>" : "") +
-      '<p class="note">Somebody else&rsquo;s card. Nothing is staked on any of ' +
+        rows.map(r => pickLine(r, "them")).join("") + "</div>"
+        : '<p class="note">No picks on this card for ' +
+          (sharedWeek === null ? "any week" : wkLabel(sharedWeek).toLowerCase()) +
+          ".</p>") +
+      '<p class="note">Somebody else&rsquo;s ' +
+      (sharedWeek === null ? "card" : wkLabel(sharedWeek).toLowerCase() + " card") +
+      '. Nothing is staked on any of ' +
       'this &mdash; <a href="' + location.pathname + '">open the week&rsquo;s ' +
       "predictions</a> to make your own calls.</p>";
   }
@@ -2571,9 +2614,15 @@
       }
       board = null;
     };
+    const wkSel = document.getElementById("shareWeek");
+    if (wkSel) wkSel.onchange = () => {
+      shareWeekSel = wkSel.value === "" ? null : Number(wkSel.value);
+      render();
+    };
     const copy = document.getElementById("copyShare");
     if (copy) copy.onclick = () => {
-      const link = location.origin + "/s/" + encodeURIComponent(profile.share_id);
+      const link = location.origin + "/s/" + encodeURIComponent(profile.share_id) +
+        (shareWeekSel === null ? "" : "?w=" + shareWeekSel);
       // Clipboard access needs a secure context and a permission the viewer
       // may refuse, so the link is always shown as well as copied.
       const done = () => toast("Share link copied.");
@@ -2791,8 +2840,10 @@
   };
 
   render();
+  const params = new URL(location.href).searchParams;
   const prettyShare = location.pathname.match(/^\/s\/([A-Za-z0-9_-]{6,32})\/?$/);
-  const shareParam = prettyShare ? prettyShare[1]
-    : new URL(location.href).searchParams.get("u");
-  authBoot().then(() => { if (shareParam) openShared(shareParam); });
+  const shareParam = prettyShare ? prettyShare[1] : params.get("u");
+  const weekParam = Number(params.get("w"));
+  const sharedWeekParam = Number.isFinite(weekParam) && weekParam > 0 ? weekParam : null;
+  authBoot().then(() => { if (shareParam) openShared(shareParam, sharedWeekParam); });
 </script>

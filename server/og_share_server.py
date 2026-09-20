@@ -16,6 +16,7 @@ import html
 import json
 import re
 import urllib.error
+import urllib.parse
 import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
@@ -61,19 +62,41 @@ def possessive(name: str) -> str:
     return name + ("'" if name.endswith("s") else "'s")
 
 
-def describe(c: dict) -> tuple:
+def week_of(path_query: str):
+    """?w=N on a share link: the card is narrowed to that one week."""
+    q = urllib.parse.parse_qs(urllib.parse.urlparse(path_query).query)
+    try:
+        w = int((q.get("w") or [""])[0])
+    except ValueError:
+        return None
+    return w if w > 0 else None
+
+
+def describe(c: dict, week=None) -> tuple:
     picks = c.get("picks") or []
+    if week is not None:
+        picks = [p for p in picks if p.get("week") == week]
     weeks = [p["week"] for p in picks if p.get("week") is not None]
     who = possessive(c.get("display_name") or "Someone")
     title = f"{who} Picks for Week {max(weeks)}" if weeks else f"{who} Picks"
 
-    wins, losses = c.get("wins") or 0, c.get("losses") or 0
+    if week is None:
+        wins, losses = c.get("wins") or 0, c.get("losses") or 0
+        pct = c.get("pct")
+        pct = float(pct) if pct is not None else None
+    else:
+        # A week link shows one week, so the record beside it counts that week
+        # and nothing else — the preview must not total up what the link held
+        # back. hit is null for a push as well as for a pending pick.
+        wins = sum(1 for p in picks if p.get("hit") is True)
+        losses = sum(1 for p in picks if p.get("hit") is False)
+        pct = (100.0 * wins / (wins + losses)) if wins + losses else None
+
     n = len(picks)
     parts = [f"{n} pick" + ("" if n == 1 else "s")]
     if wins + losses:
-        pct = c.get("pct")
         parts.append(f"{wins}–{losses}" +
-                     (f" ({float(pct):.0f}%)" if pct is not None else ""))
+                     (f" ({pct:.0f}%)" if pct is not None else ""))
     else:
         parts.append("nothing settled yet")
     parts.append("game winners and player over/unders on Sputter Bets")
@@ -127,6 +150,7 @@ class Handler(BaseHTTPRequestHandler):
             self.send_error(404)
             return
         share_id = m.group(1)
+        week = week_of(self.path)
         try:
             page = page_html()
         except OSError:
@@ -137,12 +161,13 @@ class Handler(BaseHTTPRequestHandler):
         except (urllib.error.URLError, ValueError, TimeoutError):
             c = None                    # Supabase unreachable: generic preview
         if c:
-            title, desc = describe(c)
+            title, desc = describe(c, week)
         else:
             title = "Sputter Bets — a shared card"
             desc = ("Somebody's game and player-prop picks. Nothing is staked "
                     "on any of it.")
-        block = og_block(title, desc, f"{SITE}/s/{share_id}")
+        url = f"{SITE}/s/{share_id}" + (f"?w={week}" if week else "")
+        block = og_block(title, desc, url)
         self._send(OG_RE.sub(lambda _: block, page, count=1))
 
 
