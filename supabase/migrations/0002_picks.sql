@@ -90,3 +90,9 @@ $$;
 drop trigger if exists picks_cap_trg on public.picks;
 create trigger picks_cap_trg before insert on public.picks
   for each row execute function public.picks_cap();
+
+-- Explicit Data API grants (Supabase stops auto-granting new public tables
+-- on 2026-10-30). Mirrors the grants live in production, so a rebuild from
+-- these migrations exposes exactly what prod exposes. RLS still gates rows.
+grant select, insert, update, delete on public.picks to authenticated;
+grant select, insert, update, delete on public.picks to service_role;

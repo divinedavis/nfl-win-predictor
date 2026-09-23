@@ -63,3 +63,9 @@ create trigger favorites_cap_trg before insert on public.favorites
 
 -- Deleting the account takes the favorites with it (the FK cascades), so the
 -- only thing left is the auth.users row, which Supabase owns.
+
+-- Explicit Data API grants (Supabase stops auto-granting new public tables
+-- on 2026-10-30). Mirrors the grants live in production, so a rebuild from
+-- these migrations exposes exactly what prod exposes. RLS still gates rows.
+grant select, insert, delete on public.favorites to authenticated;
+grant select, insert, update, delete on public.favorites to service_role;

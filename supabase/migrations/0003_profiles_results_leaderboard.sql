@@ -236,3 +236,11 @@ $$;
 
 revoke all on function public.shared_card(text) from public, anon, authenticated;
 grant execute on function public.shared_card(text) to anon, authenticated;
+
+-- Explicit Data API grants (Supabase stops auto-granting new public tables
+-- on 2026-10-30). Mirrors the grants live in production, so a rebuild from
+-- these migrations exposes exactly what prod exposes. RLS still gates rows.
+grant select, update on public.profiles to authenticated;
+grant select, insert, update, delete on public.profiles to service_role;
+grant select, insert, update, delete on public.game_results to service_role;
+grant select, insert, update, delete on public.prop_results to service_role;
