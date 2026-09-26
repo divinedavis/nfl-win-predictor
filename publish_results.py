@@ -120,11 +120,14 @@ def deadline_rows(sched: pd.DataFrame) -> list:
     a player prop closes when his team plays, so it inherits that kickoff.
 
     Every game in the season is published, not only the ones already offered,
-    so the lock is in place before anyone can reach a row — the trigger lets
-    an unknown ref through, and a missing deadline would be an open door."""
+    so the lock is in place before anyone can reach a row — the trigger
+    refuses a ref with no deadline (migration 0007)."""
     kicks = _kickoffs(sched)
+    # Every row carries `line` (PostgREST bulk upserts need one key set).
+    # For a prop it is the projection the page offered, which the picks
+    # trigger stamps onto the pick; a game has none.
     rows = [{"season": LAST_SEASON, "week": wk, "kind": "game",
-             "ref": f"{away}@{home}", "kickoff": iso}
+             "ref": f"{away}@{home}", "kickoff": iso, "line": None}
             for (wk, away, home), iso in kicks["game"].items()]
     if PROJECTION_LOG.exists():
         log = pd.read_csv(PROJECTION_LOG)
@@ -132,9 +135,11 @@ def deadline_rows(sched: pd.DataFrame) -> list:
         for r in log.itertuples(index=False):
             iso = kicks["team"].get((int(r.week), canon(r.team)))
             if iso:
+                line = getattr(r, "line", None)
                 rows.append({"season": LAST_SEASON, "week": int(r.week),
                              "kind": "prop",
-                             "ref": f"{r.player_id}|{r.stat}", "kickoff": iso})
+                             "ref": f"{r.player_id}|{r.stat}", "kickoff": iso,
+                             "line": round(float(line), 2) if pd.notna(line) else None})
     return rows
 
 

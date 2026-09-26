@@ -98,9 +98,12 @@ def _log_projections(shown: pd.DataFrame) -> None:
     go in: those are the only ones anyone can pick, and logging the full
     projection table instead would put a quarter of a megabyte of results into
     the payload by January."""
-    cols = ["season", "week", "stat", "player_id", "player", "team"]
+    cols = ["season", "week", "stat", "player_id", "player", "team", "line"]
     ident = ["season", "week", "stat", "player_id"]
-    rows = shown[cols].drop_duplicates()
+    # `line` is the median the page offers the over/under against. The
+    # database copies it onto every prop pick (migration 0007) rather than
+    # trusting the number the browser sends.
+    rows = shown.assign(line=shown["p50"])[cols].drop_duplicates()
     if PROJECTION_LOG.exists():
         rows = pd.concat([pd.read_csv(PROJECTION_LOG), rows], ignore_index=True)
     # keep="last" so a row written before `team` existed is replaced by the
