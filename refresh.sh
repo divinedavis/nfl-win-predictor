@@ -102,6 +102,7 @@ alert() { echo "!!!!!!!!!! ALERT: $* !!!!!!!!!!"; }
     # Static, but copied every run so an edit in the repo cannot sit
     # undeployed the way docroot pages have drifted on other projects.
     cp web/how-it-works.html /var/www/nfl/how-it-works.html
+    cp web/privacy.html /var/www/nfl/privacy.html
     echo "deployed to /var/www/nfl"
   fi
   echo "=== done $(date -Is) ==="

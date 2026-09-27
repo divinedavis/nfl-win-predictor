@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Privacy Policy · Sputter Bets</title>
+<meta name="description" content="What Sputter Bets stores when you sign in, what is public, who processes it, and how to delete it.">
+<link rel="canonical" href="https://sputterbets.com/privacy">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>&#127944;</text></svg>">
+<style>
+  :root {
+    --bg: #F5F4EF; --surface: #FFFFFF; --ink: #1C2734; --muted: #5C6675;
+    --line: #E4E2D9; --field: #2E7D46; --field-soft: #E4F0E7;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #12181F; --surface: #1B232D; --ink: #E8EBEE; --muted: #94A1AD;
+      --line: #2A3541; --field: #4CAB6E; --field-soft: #1C3226;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #12181F; --surface: #1B232D; --ink: #E8EBEE; --muted: #94A1AD;
+    --line: #2A3541; --field: #4CAB6E; --field-soft: #1C3226;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink);
+    font: 16px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+  main { max-width: 760px; margin: 0 auto; padding: 32px 16px 64px; }
+  h1 { font-size: 2rem; margin: 0 0 4px; }
+  h2 { font-size: 1.2rem; margin: 32px 0 8px; border-top: 1px solid var(--line); padding-top: 20px; }
+  p, li { color: var(--ink); }
+  .muted { color: var(--muted); }
+  a { color: var(--field); }
+  table { width: 100%; border-collapse: collapse; font-size: 0.95rem; }
+  th, td { text-align: left; vertical-align: top; padding: 8px; border-bottom: 1px solid var(--line); }
+  .box { background: var(--field-soft); border-radius: 10px; padding: 12px 16px; }
+  @media (max-width: 560px) { table, tbody, tr, td, th { display: block; } thead { display: none; } td { border: 0; padding: 4px 0; } tr { border-bottom: 1px solid var(--line); padding: 8px 0; } }
+</style>
+</head>
+<body>
+<main>
+  <p><a href="/">&larr; Sputter Bets</a></p>
+  <h1>Privacy Policy</h1>
+  <p class="muted">Last updated: September 27, 2026</p>
+
+  <p>Sputter Bets (sputterbets.com, including the college page) shows NFL and college
+  football predictions. You can read everything without an account. This page explains
+  what we collect if you sign in, what becomes public, who processes it for us, and how
+  to get it deleted. Sputter Bets is run by Divine Davis, who is the data controller.</p>
+
+  <div class="box"><strong>The short version:</strong> if you sign in with Google we store
+  your Google account's email address and name, a display name made from that name, the
+  teams and players you star, and your picks. <strong>Your display name, your picks and your
+  win&ndash;loss record are public by default</strong> &mdash; on the leaderboard, in
+  &ldquo;Friends' picks&rdquo;, in &ldquo;how did everyone else call this?&rdquo;, and on
+  your shareable picks card. You can rename yourself or hide from all of those in
+  &ldquo;My picks&rdquo;. We don't sell data, run ads, or use analytics or tracking cookies.</div>
+
+  <h2>What we collect</h2>
+  <table>
+    <thead><tr><th>Data</th><th>When</th><th>Why</th></tr></thead>
+    <tbody>
+      <tr><td>Google account email address, full name, profile photo URL and Google account ID</td>
+          <td>When you choose &ldquo;Continue with Google&rdquo;. Google hands these to our
+          sign-in provider, Supabase, which keeps them in its user record.</td>
+          <td>To create and recognise your account.</td></tr>
+      <tr><td>Display name</td>
+          <td>Created automatically at sign-in from your Google name as first name plus last
+          initial (e.g. &ldquo;Jordan D.&rdquo;), or &ldquo;Player&nbsp;xxxx&rdquo; if Google
+          sends no name. You can change it.</td>
+          <td>Shown on the leaderboard and next to your picks.</td></tr>
+      <tr><td>Starred teams and players</td><td>When you star them.</td>
+          <td>So your list follows you across devices. Private to you.</td></tr>
+      <tr><td>Picks (game winners and prop over/unders), with timestamps, and your season record</td>
+          <td>When you make a pick.</td><td>Pick'em, the leaderboard and your picks card.</td></tr>
+      <tr><td>Public / hidden setting and a random share ID</td><td>At sign-in.</td>
+          <td>Controls whether you appear publicly; the share ID is the link to your card.</td></tr>
+      <tr><td>Sign-in session tokens</td><td>Stored in your browser's local storage while signed in.</td>
+          <td>Keeps you signed in. Removed when you sign out.</td></tr>
+      <tr><td>Server logs: IP address, browser user agent, page requested, time</td>
+          <td>Every visit, signed in or not, on our web server and on Supabase.</td>
+          <td>Security, abuse prevention and fixing errors.</td></tr>
+    </tbody>
+  </table>
+  <p>We do not collect passwords, payment details, location, contacts or anything from your
+  Google account beyond the basic profile above. We do not take bets or handle money.</p>
+
+  <h2>What is public</h2>
+  <p>While your profile is set to public (the default), anyone &mdash; signed in or not &mdash;
+  can see your display name, your picks for each week, and your win&ndash;loss record: on the
+  leaderboard, in the players list and &ldquo;Friends' picks&rdquo;, in the per-game
+  &ldquo;others' picks&rdquo; line, and on your shareable card at
+  <code>sputterbets.com/s/&lt;share&nbsp;ID&gt;</code>, whose link preview also shows your
+  display name and record. Your email address, Google ID and photo are never shown to anyone.
+  Turn on &ldquo;Hidden from the leaderboard&rdquo; in My picks to remove yourself from every
+  public view; your share link then stops showing your picks.</p>
+
+  <h2>Who processes your data</h2>
+  <ul>
+    <li><strong>Google</strong> (Google LLC) &mdash; the sign-in provider. Google's own
+      <a href="https://policies.google.com/privacy">privacy policy</a> covers what it records
+      when you sign in.</li>
+    <li><strong>Supabase</strong> (Supabase, Inc.) &mdash; hosts our database and handles
+      sign-in, in the United States.</li>
+    <li><strong>DigitalOcean</strong> (DigitalOcean, LLC) &mdash; hosts the website server in
+      the United States.</li>
+  </ul>
+  <p>No other third party receives your data. There are no ads, analytics, trackers or
+  third-party scripts on the site. We do not sell or share personal information for
+  cross-context behavioural advertising.</p>
+
+  <h2>How long we keep it</h2>
+  <p>Account data, stars and picks are kept until you ask us to delete your account. Web
+  server logs are rotated and deleted after about two weeks; Supabase keeps its own
+  sign-in and API logs for a short period under its policies.</p>
+
+  <h2>Deleting your data</h2>
+  <p>You can unstar anything and remove an unlocked pick at any time on the site. To delete
+  your whole account &mdash; profile, picks, stars and the sign-in record &mdash; email
+  <a href="mailto:divinejdavis@gmail.com?subject=Sputter%20Bets%20account%20deletion">divinejdavis@gmail.com</a>
+  from the address you signed in with. We delete it within 30 days and confirm by reply.</p>
+
+  <h2>Your rights</h2>
+  <p><strong>Everyone:</strong> you can ask what we hold about you, get a copy, correct it, or
+  have it deleted, by emailing the address below. We answer within 30 days and never charge
+  or treat you differently for asking.</p>
+  <p><strong>California (CCPA/CPRA):</strong> you have the right to know, access, correct and
+  delete personal information, and to opt out of its sale or sharing. We do not sell or share
+  it, and we collect no sensitive personal information. You may use an authorised agent.</p>
+  <p><strong>EEA and UK (GDPR / UK GDPR):</strong> our legal bases are performance of a contract
+  (running your account and pick'em when you sign in) and legitimate interests (security logs).
+  You have the rights of access, rectification, erasure, restriction, portability and objection,
+  and you may complain to your local data protection authority (in the UK, the ICO). Data is
+  processed in the United States; our processors use standard contractual clauses for transfers.</p>
+
+  <h2>Children</h2>
+  <p>Sputter Bets is about sports betting lines and is meant for adults. It is not directed to
+  anyone under 18, and we do not knowingly collect data from children under 13. If you believe
+  a child has signed in, email us and we will delete the account.</p>
+
+  <h2>Changes</h2>
+  <p>If this policy changes, we update the date at the top of this page. Material changes will
+  also be noted on the site.</p>
+
+  <h2>Contact</h2>
+  <p>Divine Davis &mdash; <a href="mailto:divinejdavis@gmail.com">divinejdavis@gmail.com</a></p>
+</main>
+</body>
+</html>

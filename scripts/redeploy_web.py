@@ -33,6 +33,7 @@ def main() -> None:
     if DOCROOT.is_dir():
         shutil.copy(idx, DOCROOT / "index.html")
         shutil.copy("web/how-it-works.html", DOCROOT / "how-it-works.html")
+        shutil.copy("web/privacy.html", DOCROOT / "privacy.html")
         print(f"deployed to {DOCROOT}")
 
 

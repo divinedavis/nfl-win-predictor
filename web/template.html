@@ -716,6 +716,7 @@
     <p><a class="how" href="/how-it-works.html">How it works &mdash; the model,
     the backtests, and what the numbers mean</a></p>
     </div>
+    <p><a href="/privacy">Privacy policy</a></p>
   </footer>
 </div>
 
@@ -1973,8 +1974,12 @@
       "readable without an account. It only keeps the teams and players you star, " +
       "so they follow you to your phone.</p>" +
       (buttons || '<p class="fineprint">Sign-in is not switched on yet.</p>') +
-      '<p class="fineprint">No password, and no email to confirm. We store the ' +
-      "account your provider hands back and the list of things you star &mdash; nothing else.</p></div>");
+      '<p class="fineprint">No password, and no email to confirm. We store your ' +
+      "Google email and name, a display name made from it (first name + last initial), " +
+      "the teams and players you star, and your picks. Your display name, picks and " +
+      "record are <b>public by default</b> &mdash; on the leaderboard and your shareable " +
+      "picks card &mdash; and you can rename or hide yourself in My picks. " +
+      '<a href="/privacy">Privacy policy</a></p></div>');
     bg.querySelectorAll("[data-oauth]").forEach(b => {
       b.onclick = () => signIn(b.dataset.oauth);
     });
